@@ -49,4 +49,8 @@ namespace dyntrace
     }
 }
 
+<<<<<<< HEAD
 #endif
+=======
+#endif
+>>>>>>> Integration of fasttp with uftrace
