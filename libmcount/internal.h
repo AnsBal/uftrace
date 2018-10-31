@@ -196,7 +196,7 @@ static inline int mcount_gettid(struct mcount_thread_data *mtdp)
  */
 static inline void mcount_memset1(void *dst, unsigned char d, int len)
 {
-	unsigned char *p = dst;
+	unsigned char *p = (unsigned char *)dst;
 
 	while (len-- > 0)
 		*p++ = d;
@@ -205,8 +205,8 @@ static inline void mcount_memset1(void *dst, unsigned char d, int len)
 static inline void mcount_memcpy1(void * restrict dst,
 				  const void * restrict src, int len)
 {
-	unsigned char * restrict p = dst;
-	const unsigned char * restrict q = src;
+	unsigned char * restrict p = (unsigned char *)dst;
+	const unsigned char * restrict q = (const unsigned char *)src;
 
 	while (len-- > 0)
 		*p++ = *q++;
@@ -214,7 +214,7 @@ static inline void mcount_memcpy1(void * restrict dst,
 
 static inline void mcount_memset4(void *dst, unsigned int d, int len)
 {
-	unsigned int *p = dst;
+	unsigned int *p = (unsigned int *)dst;
 	int len4 = len / 4;
 
 	while (len4-- > 0)
@@ -224,8 +224,8 @@ static inline void mcount_memset4(void *dst, unsigned int d, int len)
 static inline void mcount_memcpy4(void * restrict dst,
 				  const void * restrict src, int len)
 {
-	unsigned int * restrict p = dst;
-	const unsigned int * restrict q = src;
+	unsigned int * restrict p = (unsigned int *)dst;
+	const unsigned int * restrict q = (const unsigned int *)src;
 	int len4 = len / 4;
 
 	while (len4-- > 0)

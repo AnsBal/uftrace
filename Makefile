@@ -59,6 +59,8 @@ ifneq ($(elfdir),)
   COMMON_LDFLAGS += -L$(elfdir)/lib
 endif
 
+COMMON_LDFLAGS += -L/$(srcdir)/libfasttp/ -ldyntrace-fasttp
+
 COMMON_CFLAGS += -W -Wall -Wno-unused-parameter -Wno-missing-field-initializers
 
 #
@@ -164,8 +166,13 @@ LIBMCOUNT_NOP_OBJS := $(patsubst $(srcdir)/%.c,$(objdir)/%.op,$(LIBMCOUNT_NOP_SR
 
 LIBMCOUNT_ARCH_OBJS := $(objdir)/arch/$(ARCH)/mcount-entry.op
 
+LIBMCOUNT_FASTTP_OBJS := $(objdir)/libfasttp/fasttp_wrapper.o
+
+FASTTP_DEPS := $(wildcard $(srcdir)/libfasttp/*.h*)  $(wildcard $(srcdir)/libfasttp/include/dyntrace/*.h*)
+FASTTP_DEPS += $(wildcard $(srcdir)/libfasttp/include/dyntrace/arch/*.h*) $(wildcard $(srcdir)/libfasttp/include/dyntrace/fasttp/*.h*)
+
 COMMON_DEPS := $(objdir)/.config $(UFTRACE_HDRS)
-LIBMCOUNT_DEPS := $(COMMON_DEPS) $(srcdir)/libmcount/internal.h
+LIBMCOUNT_DEPS := $(COMMON_DEPS) $(srcdir)/libmcount/internal.h 
 
 CFLAGS_$(objdir)/mcount.op = -pthread
 CFLAGS_$(objdir)/cmds/record.o = -DINSTALL_LIB_PATH='"$(libdir)"'
@@ -214,17 +221,20 @@ $(LIBMCOUNT_FAST_SINGLE_OBJS): $(objdir)/%-fast-single.op: $(srcdir)/%.c $(LIBMC
 $(LIBMCOUNT_NOP_OBJS): $(objdir)/%.op: $(srcdir)/%.c $(LIBMCOUNT_DEPS)
 	$(QUIET_CC_FPIC)$(CC) $(LIB_CFLAGS) -c -o $@ $<
 
-$(objdir)/libmcount/libmcount.so: $(LIBMCOUNT_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS)
+$(objdir)/libmcount/libmcount.so: $(LIBMCOUNT_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS) $(LIBMCOUNT_FASTTP_OBJS)
+	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS) 
+
+$(objdir)/libmcount/libmcount-fast.so: $(LIBMCOUNT_FAST_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS) $(LIBMCOUNT_FASTTP_OBJS)
 	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS)
 
-$(objdir)/libmcount/libmcount-fast.so: $(LIBMCOUNT_FAST_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS)
+$(objdir)/libmcount/libmcount-single.so: $(LIBMCOUNT_SINGLE_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS) $(LIBMCOUNT_FASTTP_OBJS)
 	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS)
 
-$(objdir)/libmcount/libmcount-single.so: $(LIBMCOUNT_SINGLE_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS)
+$(objdir)/libmcount/libmcount-fast-single.so: $(LIBMCOUNT_FAST_SINGLE_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS) $(LIBMCOUNT_FASTTP_OBJS)
 	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS)
 
-$(objdir)/libmcount/libmcount-fast-single.so: $(LIBMCOUNT_FAST_SINGLE_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS)
-	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS)
+$(LIBMCOUNT_FASTTP_OBJS): $(wildcard $(srcdir)/libfasttp/*.c*) $(LIBMCOUNT_DEPS) $(FASTTP_DEPS)
+	@$(MAKE) -B -C $(srcdir)/libfasttp/
 
 $(objdir)/libmcount/libmcount-nop.so: $(LIBMCOUNT_NOP_OBJS)
 	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS)
@@ -332,6 +342,7 @@ clean:
 	@$(MAKE) -sC $(srcdir)/tests ARCH=$(ARCH) clean
 	@$(MAKE) -sC $(srcdir)/doc clean
 	@$(MAKE) -sC $(srcdir)/libtraceevent clean
+	@$(MAKE) -sC $(srcdir)/libfasttp clean
 
 reset-coverage:
 	$(Q)find -name "*\.gcda" | xargs $(RM)
@@ -342,3 +353,4 @@ ctags:
 		| xargs ctags --regex-asm='/^(GLOBAL|ENTRY|END)\(([^)]*)\).*/\2/'
 
 .PHONY: all config clean test dist doc ctags PHONY
+
