@@ -26,13 +26,13 @@ extern "C" {
     fasttp::tracepoint* new_tracepoint(void* address) {
         
         ops.x86.disable_thread_safe = true;
-        auto enter_handler = [](const void *caller, const arch::regs& r)
+        auto enter_handler = [](const void *caller, const arch::regs& r, const void *return_address)
         {
-            fasttp_entry((unsigned long)const_cast<void*>(caller),(unsigned long)const_cast<void*>(caller));            
+            fasttp_entry((unsigned long)const_cast<void*>(return_address),(unsigned long)const_cast<void*>(caller));            
         };
-        auto exit_handler = [](const void* caller, const arch::regs& r)
+        auto exit_handler = [](const void* caller, const arch::regs& r, const void *return_address)
         {
-            fasttp_exit((unsigned long)const_cast<void*>(caller),(unsigned long)const_cast<void*>(caller));            
+            fasttp_exit((unsigned long)const_cast<void*>(return_address),(unsigned long)const_cast<void*>(caller));            
         };
         return new fasttp::tracepoint{address, fasttp::entry_exit_handler{enter_handler, exit_handler}, ops};
     }
