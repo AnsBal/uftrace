@@ -21,20 +21,18 @@ using namespace dyntrace;
 extern "C" {
 #endif
 
+    fasttp::options ops{};
+    
     fasttp::tracepoint* new_tracepoint(void* address) {
-        fasttp::options ops{};
+        
         ops.x86.disable_thread_safe = true;
         auto enter_handler = [](const void *caller, const arch::regs& r)
         {
-            //cygprof_entry((unsigned long)const_cast<void*>(caller),(unsigned long)const_cast<void*>(caller));            
-            using arch::arg;
-            printf("Enter %p a=%d\n", caller, arg<int>(r, 0));
+            fasttp_entry((unsigned long)const_cast<void*>(caller),(unsigned long)const_cast<void*>(caller));            
         };
         auto exit_handler = [](const void* caller, const arch::regs& r)
         {
-            //cygprof_exit((unsigned long)const_cast<void*>(caller),(unsigned long)const_cast<void*>(caller));            
-            using arch::ret;
-            printf("Exit  %p r=%lu\n", caller, ret(r));
+            fasttp_exit((unsigned long)const_cast<void*>(caller),(unsigned long)const_cast<void*>(caller));            
         };
         return new fasttp::tracepoint{address, fasttp::entry_exit_handler{enter_handler, exit_handler}, ops};
     }

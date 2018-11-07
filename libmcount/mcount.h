@@ -65,6 +65,8 @@ void __monstartup(unsigned long low, unsigned long high);
 void _mcleanup(void);
 void mcount_restore(void);
 void mcount_reset(void);
+int fasttp_entry(unsigned long parent, unsigned long child);
+void fasttp_exit(unsigned long parent, unsigned long child);
 
 #define SHMEM_BUFFER_SIZE  (128 * 1024)
 
