@@ -15,7 +15,7 @@ namespace dyntrace::tracer
             : std::runtime_error{tracer + ": " + msg}{}
     };
 
-    using point_handler = std::function<void(const void*, const dyntrace::arch::regs&)>;
+    using point_handler = std::function<void(const void*, const dyntrace::arch::regs&, const void*)>;
     using entry_exit_handler = std::tuple<point_handler, point_handler>;
     using handler = std::variant<point_handler, entry_exit_handler>;
 
@@ -25,9 +25,9 @@ namespace dyntrace::tracer
         point_handler unpack_regs(Func&& func, std::index_sequence<Ints...>) noexcept
         {
             return point_handler{
-                [func = std::forward<Func>(func)](const void *caller, const dyntrace::arch::regs &regs) -> void
+                [func = std::forward<Func>(func)](const void *caller, const dyntrace::arch::regs &regs, const void *return_address) -> void
                 {
-                    func(caller, dyntrace::arch::arg<std::tuple_element_t<Ints, Tuple>>(regs, Ints)...);
+                    func(caller, dyntrace::arch::arg<std::tuple_element_t<Ints, Tuple>>(regs, Ints)..., return_address);
                 }
             };
         };
