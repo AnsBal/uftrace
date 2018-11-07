@@ -1146,6 +1146,14 @@ out:
 	mtdp->idx--;
 }
 
+int fasttp_entry(unsigned long parent, unsigned long child) {
+	return cygprof_entry(parent, child);
+}
+
+void fasttp_exit(unsigned long parent, unsigned long child) {
+	cygprof_exit(parent, child);
+}
+
 void xray_entry(unsigned long parent, unsigned long child,
 		struct mcount_regs *regs)
 {
@@ -1344,6 +1352,7 @@ static __used void mcount_startup(void)
 	char *pattern_str;
 	struct stat statbuf;
 	bool nest_libcall;
+	bool fasttp;
 	enum uftrace_pattern_type patt_type = PATT_REGEX;
 
 	if (!(mcount_global_flags & MCOUNT_GFL_SETUP))
@@ -1371,6 +1380,7 @@ static __used void mcount_startup(void)
 	script_str = getenv("UFTRACE_SCRIPT");
 	nest_libcall = !!getenv("UFTRACE_NEST_LIBCALL");
 	pattern_str = getenv("UFTRACE_PATTERN");
+	fasttp = !!getenv("UFTRACE_FASTTP");
 
 	page_size_in_kb = getpagesize() / KB;
 
@@ -1443,8 +1453,12 @@ static __used void mcount_startup(void)
 	if (threshold_str)
 		mcount_threshold = strtoull(threshold_str, NULL, 0);
 
-	if (patch_str)
-		mcount_dynamic_update(&symtabs, patch_str, patt_type);
+	if (patch_str) {
+		if(fasttp)
+			mcount_setup_fasttp(&symtabs, patch_str, patt_type);
+		else
+			mcount_dynamic_update(&symtabs, patch_str, patt_type);
+	}
 
 	if (event_str)
 		mcount_setup_events(dirname, event_str, patt_type);
@@ -1472,6 +1486,7 @@ static __used void mcount_startup(void)
 
 static void mcount_cleanup(void)
 {
+	mcount_cleanup_fasttp();
 	mcount_finish();
 	destroy_dynsym_indexes();
 

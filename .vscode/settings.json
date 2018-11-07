@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "filter.h": "c",
+        "mcount.h": "c",
+        "fasttp_wrapper.h": "c",
+        "utils.h": "c",
+        "internal.h": "c",
+        "list.h": "c"
+    }
+}

@@ -367,6 +367,10 @@ struct mcount_dynamic_info {
 	void *arch;
 };
 
+int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
+			  enum uftrace_pattern_type ptype);
+void mcount_cleanup_fasttp();
+
 int mcount_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 			  enum uftrace_pattern_type ptype);
 

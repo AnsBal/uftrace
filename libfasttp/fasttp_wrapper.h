@@ -1,3 +1,6 @@
+#ifndef FASTTP_WRAPPER_H
+#define FASTTP_WRAPPER_H
+
 #include <stdbool.h>
 #ifdef __cplusplus
 extern "C" {
@@ -20,4 +23,6 @@ namespace dyntrace::fasttp
     }
 } 
 #endif
+
+#endif /* FASTTP_WRAPPER_H */
 
