@@ -48,7 +48,11 @@ namespace dyntrace::fasttp
 }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 #endif
 =======
 #endif
 >>>>>>> Integration of fasttp with uftrace
+=======
+#endif
+>>>>>>> Update fasttp headers
