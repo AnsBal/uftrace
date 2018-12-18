@@ -355,7 +355,7 @@ clean:
 	@$(MAKE) -sC $(srcdir)/arch/$(ARCH) clean
 	@$(MAKE) -sC $(srcdir)/tests ARCH=$(ARCH) clean
 	@$(MAKE) -sC $(srcdir)/doc clean
-	@$(MAKE) -sC $(srcdir)/libtraceevent clean
+	@$(MAKE) -sC $(srcdir)/libtraceevent BUILD_SRC=$(srcdir)/libtraceevent BUILD_OUTPUT=$(objdir)/libtraceevent CONFIG_FLAGS="$(TRACEEVENT_CFLAGS)" clean
 	@$(MAKE) -sC $(srcdir)/libfasttp clean
 
 reset-coverage:
