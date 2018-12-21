@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <dlfcn.h>
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "mcount"
@@ -43,6 +44,21 @@ struct plthook_data * mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 		/* should never reach here */
 		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
 	};
+	const uint8_t tramp_plt1[] = {  
+		/* JMP plthook_addr */
+		0xff, 0x25, 0xa, 0, 0, 0,
+		/* should never reach here */
+		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+		0xcc, 0xcc, 0xcc, 0xcc,
+	};
+	const uint8_t tramp_jmp_insns[] = {  
+		/* JMP plt0 */
+		0xe9, 0, 0, 0, 0,
+		/* should never reach here */
+		0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+		0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+	};
+
 	void *plthook_addr = plt_hooker;
 	void *tramp;
 
@@ -56,7 +72,7 @@ struct plthook_data * mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 		return NULL;
 	}
 
-	tramp_len = TRAMP_PLT0_SIZE + pd->dsymtab.nr_sym * TRAMP_ENT_SIZE;
+	tramp_len = TRAMP_PLT0_SIZE * 2 + pd->dsymtab.nr_sym * TRAMP_ENT_SIZE;
 	trampoline = mmap(NULL, tramp_len, PROT_READ|PROT_WRITE,
 			  MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 	if (trampoline == MAP_FAILED) {
@@ -80,12 +96,38 @@ struct plthook_data * mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 	memcpy(tramp, &plthook_addr, sizeof(plthook_addr));
 	tramp += sizeof(long);
 
+	void* mcount_addr = dlsym(RTLD_NEXT, "mcount");
+
+	/* setup PLT1 */
+	memcpy(tramp, tramp_plt1, sizeof(tramp_plt1));
+	tramp += sizeof(tramp_plt1);
+	memcpy(tramp, &mcount_addr, sizeof(plthook_addr));
+	tramp += sizeof(long);
+	tramp += sizeof(long);
+
+	#define SKIP_FUNC(func)  { #func }
+		struct {
+			const char *name;
+			void *addr;
+		} hook_list[] = {
+			/*SKIP_FUNC(mcount),
+			SKIP_FUNC(_mcount),
+			SKIP_FUNC(__fentry__),
+			SKIP_FUNC(__gnu_mcount_nc),
+			SKIP_FUNC(__cyg_profile_func_enter),
+			SKIP_FUNC(__cyg_profile_func_exit),*/
+			SKIP_FUNC(mcount),
+		};
+	#undef SKIP_FUNC
+	size_t plt_hook_nr = ARRAY_SIZE(hook_list);
+
 	for (i = 0; i < pd->dsymtab.nr_sym; i++) {
 		uint32_t pcrel;
 		Elf64_Rela *rela;
 		struct sym *sym;
 		unsigned k;
 		bool skip = false;
+		bool is_mcount_sym = false;
 
 		sym = &pd->dsymtab.sym[i];
 
@@ -97,23 +139,47 @@ struct plthook_data * mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 		}
 		if (skip)
 			continue;
+		printf("name %s\n", sym->name); fflush(stdout);
 
-		/* copy trampoline instructions */
-		memcpy(tramp, tramp_insns, TRAMP_ENT_SIZE);
+		for (k = 0; k < plt_hook_nr; k++) {
+			if (!strcmp(sym->name, hook_list[k].name)) {
+					is_mcount_sym = true;
+					break;
+			}
+		}	
 
-		/* update offset (child id) */
-		memcpy(tramp + TRAMP_IDX_OFFSET, &i, sizeof(i));
+		if(is_mcount_sym) {
+			/* copy trampoline instructions */
+			memcpy(tramp, tramp_jmp_insns, TRAMP_ENT_SIZE);
 
-		/* update jump offset */
-		pcrel = trampoline - (tramp + TRAMP_PCREL_JMP);
-		memcpy(tramp + TRAMP_JMP_OFFSET, &pcrel, sizeof(pcrel));
+			/* update jump offset */
+			pcrel = trampoline + TRAMP_PLT0_SIZE - (tramp + 5);
+			memcpy(tramp + 1, &pcrel, sizeof(pcrel));
 
-		rela = (void*)sym->addr;
-		/* save resolved address in GOT */
-		memcpy(&pd->resolved_addr[i], (void *)rela->r_offset + offset,
-		       sizeof(long));
-		/* update GOT to point the trampoline */
-		memcpy((void *)rela->r_offset + offset, &tramp, sizeof(long));
+			rela = (void*)sym->addr;
+			/* save resolved address in GOT */
+			memcpy(&pd->resolved_addr[i], (void *)rela->r_offset + offset,
+				sizeof(long));
+			/* update GOT to point the trampoline */
+			memcpy((void *)rela->r_offset + offset, &tramp, sizeof(long));
+		} else {
+			/* copy trampoline instructions */
+			memcpy(tramp, tramp_insns, TRAMP_ENT_SIZE);
+
+			/* update offset (child id) */
+			memcpy(tramp + TRAMP_IDX_OFFSET, &i, sizeof(i));
+
+			/* update jump offset */
+			pcrel = trampoline - (tramp + TRAMP_PCREL_JMP);
+			memcpy(tramp + TRAMP_JMP_OFFSET, &pcrel, sizeof(pcrel));
+
+			rela = (void*)sym->addr;
+			/* save resolved address in GOT */
+			memcpy(&pd->resolved_addr[i], (void *)rela->r_offset + offset,
+				sizeof(long));
+			/* update GOT to point the trampoline */
+			memcpy((void *)rela->r_offset + offset, &tramp, sizeof(long));
+		}
 
 		tramp += TRAMP_ENT_SIZE;
 	}
