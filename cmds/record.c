@@ -144,9 +144,105 @@ void put_libmcount_path(char *libpath)
 	free(libpath);
 }
 
-static void setup_child_environ(struct opts *opts, int pfd,
+int pfdsocket;
+#include <sys/socket.h>
+#include <sys/un.h>
+#include "libloader/libloader.h"
+static void send_env_msg(const char* name, const char* value)
+{
+	struct libloader_msg_env msg_env_name = {
+		.len = strlen(name),
+	};
+	struct libloader_msg_env msg_env_value = {
+		.len = strlen(value),
+	};
+	struct uftrace_msg msg = {
+		.magic = LOADTRACER_MSG_MAGIC,
+		.type = LIBLODAER_SET_ENV,
+		.len = sizeof(msg_env_name) + strlen(name) + sizeof(msg_env_value) + strlen(value),
+	};
+	struct iovec iov[5] = {
+		{ .iov_base = &msg, .iov_len = sizeof(msg), },
+		{ .iov_base = &msg_env_name, .iov_len = sizeof(msg_env_name), },
+		{ .iov_base = (void *) name, .iov_len = msg_env_name.len, },
+		{ .iov_base = &msg_env_value, .iov_len = sizeof(msg_env_value), },
+		{ .iov_base = (void *) value, .iov_len = msg_env_value.len, },
+	};
+	int len = sizeof(msg) + msg.len;
+
+	if (pfdsocket < 0)
+		return;
+
+	if (writev(pfdsocket, iov, 5) != len) {
+		printf("couldnt write all bytes\n");
+	}
+}
+static void send_dlopen_msg(const char* name, int flags)
+{
+	struct libloader_msg_dlopen msg_dlopen = {
+		.namelen = strlen(name),
+		.flags = flags,
+	};
+
+	struct uftrace_msg msg = {
+		.magic = LOADTRACER_MSG_MAGIC,
+		.type = LIBLOADER_DL_OPEN,
+		.len = sizeof(msg_dlopen) + strlen(name) ,
+	};
+	struct iovec iov[3] = {
+		{ .iov_base = &msg, .iov_len = sizeof(msg), },
+		{ .iov_base = &msg_dlopen, .iov_len = sizeof(msg_dlopen), },
+		{ .iov_base = (void *) name, .iov_len = msg_dlopen.namelen, },
+	};
+	int len = sizeof(msg) + msg.len;
+
+	if (pfdsocket < 0)
+		return;
+
+	if (writev(pfdsocket, iov, 3) != len) {
+		printf("couldnt write all bytes\n");
+	}
+}
+static void recv_dlclose_msg(const char* name, const char* value)
+{
+	struct uftrace_msg msg = {
+		.magic = LOADTRACER_MSG_MAGIC,
+		.type = LIBLOADER_DL_CLOSE,
+		.len = 0,
+	};
+	struct iovec iov[1] = {
+		{ .iov_base = &msg, .iov_len = sizeof(msg), },
+	};
+	int len = sizeof(msg) + msg.len;
+
+	if (pfdsocket < 0)
+		return;
+
+	if (writev(pfdsocket, iov, 1) != len) {
+		printf("couldnt write all bytes\n");
+	}
+}
+static void setup_child_environ(struct opts *opts,
 				int argc, char *argv[])
 {
+	struct sockaddr_un addr;
+	int fd;
+
+	if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		perror("socket error");
+		exit(-1);
+	}
+	char *socket_path = "/tmp/loadtracer/sock";
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path)-1);
+
+	if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+		perror("connect error");
+		exit(-1);
+	}
+	pfdsocket = fd;
+
 	char buf[PATH_MAX];
 	char *old_preload, *libpath;
 
@@ -170,7 +266,7 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		char *filter_str = uftrace_clear_kernel(opts->filter);
 
 		if (filter_str) {
-			setenv("UFTRACE_FILTER", filter_str, 1);
+			send_env_msg("UFTRACE_FILTER", filter_str);
 			free(filter_str);
 		}
 	}
@@ -179,7 +275,7 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		char *trigger_str = uftrace_clear_kernel(opts->trigger);
 
 		if (trigger_str) {
-			setenv("UFTRACE_TRIGGER", trigger_str, 1);
+			send_env_msg("UFTRACE_TRIGGER", trigger_str);
 			free(trigger_str);
 		}
 	}
@@ -188,7 +284,7 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		char *arg_str = uftrace_clear_kernel(opts->args);
 
 		if (arg_str) {
-			setenv("UFTRACE_ARGUMENT", arg_str, 1);
+			send_env_msg("UFTRACE_ARGUMENT", arg_str);
 			free(arg_str);
 		}
 	}
@@ -197,23 +293,23 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		char *retval_str = uftrace_clear_kernel(opts->retval);
 
 		if (retval_str) {
-			setenv("UFTRACE_RETVAL", retval_str, 1);
+			send_env_msg("UFTRACE_RETVAL", retval_str);
 			free(retval_str);
 		}
 	}
 
 	if (opts->auto_args)
-		setenv("UFTRACE_AUTO_ARGS", "1", 1);
+		send_env_msg("UFTRACE_AUTO_ARGS", "1");
 
 	if(opts->fasttp) {
-		setenv("UFTRACE_FASTTP", "1", 1);		
+		send_env_msg("UFTRACE_FASTTP", "1");
 	}
 
 	if (opts->patch) {
 		char *patch_str = uftrace_clear_kernel(opts->patch);
 
 		if (patch_str) {
-			setenv("UFTRACE_PATCH", patch_str, 1);
+			send_env_msg("UFTRACE_PATCH", patch_str);
 			free(patch_str);
 		}
 	}
@@ -222,93 +318,92 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		char *event_str = uftrace_clear_kernel(opts->event);
 
 		if (event_str) {
-			setenv("UFTRACE_EVENT", event_str, 1);
+			send_env_msg("UFTRACE_EVENT", event_str);
 			free(event_str);
 		}
 	}
 
 	if (opts->watch)
-		setenv("UFTRACE_WATCH", opts->watch, 1);
+		send_env_msg("UFTRACE_WATCH", opts->watch);
 
 	if (opts->depth != OPT_DEPTH_DEFAULT) {
 		snprintf(buf, sizeof(buf), "%d", opts->depth);
-		setenv("UFTRACE_DEPTH", buf, 1);
+		send_env_msg("UFTRACE_DEPTH", buf);
 	}
 
 	if (opts->max_stack != OPT_RSTACK_DEFAULT) {
 		snprintf(buf, sizeof(buf), "%d", opts->max_stack);
-		setenv("UFTRACE_MAX_STACK", buf, 1);
+		send_env_msg("UFTRACE_MAX_STACK", buf);
 	}
 
 	if (opts->threshold) {
 		snprintf(buf, sizeof(buf), "%"PRIu64, opts->threshold);
-		setenv("UFTRACE_THRESHOLD", buf, 1);
+		send_env_msg("UFTRACE_THRESHOLD", buf);
 	}
 
 	if (opts->caller) {
 		char *caller_str = uftrace_clear_kernel(opts->caller);
 
 		if (caller_str) {
-			setenv("UFTRACE_CALLER", caller_str, 1);
+			send_env_msg("UFTRACE_CALLER", caller_str);
 			free(caller_str);
 		}
 	}
 
 	if (opts->libcall) {
-		setenv("UFTRACE_PLTHOOK", "1", 1);
+		send_env_msg("UFTRACE_PLTHOOK", "1");
 
 		if (opts->want_bind_not) {
 			/* do not update GOTPLT after resolving symbols */
-			setenv("LD_BIND_NOT", "1", 1);
+			send_env_msg("LD_BIND_NOT", "1");
 		}
 
 		if (opts->nest_libcall)
-			setenv("UFTRACE_NEST_LIBCALL", "1", 1);
+			send_env_msg("UFTRACE_NEST_LIBCALL", "1");
 	}
 
 	if (strcmp(opts->dirname, UFTRACE_DIR_NAME))
-		setenv("UFTRACE_DIR", opts->dirname, 1);
+		send_env_msg("UFTRACE_DIR", opts->dirname);
 
 	if (opts->bufsize != SHMEM_BUFFER_SIZE) {
 		snprintf(buf, sizeof(buf), "%lu", opts->bufsize);
-		setenv("UFTRACE_BUFFER", buf, 1);
+		send_env_msg("UFTRACE_BUFFER", buf);
 	}
 
 	if (opts->logfile) {
 		snprintf(buf, sizeof(buf), "%d", fileno(logfp));
-		setenv("UFTRACE_LOGFD", buf, 1);
+		send_env_msg("UFTRACE_LOGFD", buf);
 	}
-
-	snprintf(buf, sizeof(buf), "%d", pfd);
-	setenv("UFTRACE_PIPE", buf, 1);
-	setenv("UFTRACE_SHMEM", "1", 1);
+		
+	send_env_msg("UFUFTRACE_SHMEMTRACE_LOGFD", "1");
 
 	if (debug) {
 		snprintf(buf, sizeof(buf), "%d", debug);
-		setenv("UFTRACE_DEBUG", buf, 1);
-		setenv("UFTRACE_DEBUG_DOMAIN", build_debug_domain_string(), 1);
+		send_env_msg("UFTRACE_DEBUG", buf);
+		send_env_msg("UFTRACE_DEBUG_DOMAIN", build_debug_domain_string());
 	}
 
 	if (opts->disabled)
-		setenv("UFTRACE_DISABLED", "1", 1);
+		send_env_msg("UFTRACE_DISABLED", "1");
 
 	if (log_color == COLOR_ON) {
 		snprintf(buf, sizeof(buf), "%d", log_color);
-		setenv("UFTRACE_COLOR", buf, 1);
+		send_env_msg("UFTRACE_COLOR", buf);
 	}
 
 	snprintf(buf, sizeof(buf), "%d", demangler);
-	setenv("UFTRACE_DEMANGLE", buf, 1);
+	send_env_msg("UFTRACE_DEMANGLE", buf);
+
 
 	if ((opts->kernel || has_kernel_event(opts->event)) &&
 	    check_kernel_pid_filter())
-		setenv("UFTRACE_KERNEL_PID_UPDATE", "1", 1);
+		send_env_msg("UFTRACE_KERNEL_PID_UPDATE", "1");
 
 	if (opts->script_file)
-		setenv("UFTRACE_SCRIPT", opts->script_file, 1);
+		send_env_msg("UFTRACE_SCRIPT", opts->script_file);
 
 	if (opts->patt_type != PATT_REGEX)
-		setenv("UFTRACE_PATTERN", get_filter_pattern(opts->patt_type), 1);
+		send_env_msg("UFTRACE_PATTERN", get_filter_pattern(opts->patt_type));
 
 	if (argc > 0) {
 		char *args = NULL;
@@ -317,7 +412,7 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		for (i = 0; i < argc; i++)
 			args = strjoin(args, argv[i], "\n");
 
-		setenv("UFTRACE_ARGS", args, 1);
+		send_env_msg("UFTRUFTRACE_PATTERNACE_DEMANGLE", get_filter_pattern(opts->patt_type));
 		free(args);
 	}
 
@@ -333,14 +428,14 @@ static void setup_child_environ(struct opts *opts, int pfd,
 		char *preload = xmalloc(len);
 
 		snprintf(preload, len, "%s:%s", libpath, old_preload);
-		setenv("LD_PRELOAD", preload, 1);
+		send_env_msg("LD_PRELOAD", preload);
 		free(preload);
 	}
 	else
-		setenv("LD_PRELOAD", libpath, 1);
+		send_env_msg("LD_PRELOAD", libpath);
 
 	put_libmcount_path(libpath);
-	setenv("XRAY_OPTIONS", "patch_premain=false", 1);
+	send_env_msg("XRAY_OPTIONS", "patch_premain=false");
 }
 
 static uint64_t calc_feat_mask(struct opts *opts)
@@ -1718,8 +1813,8 @@ static void start_tracing(struct writer_data *wd, struct opts *opts, int ready_f
 	}
 
 	/* signal child that I'm ready */
-	if (write(ready_fd, &go, sizeof(go)) != (ssize_t)sizeof(go))
-		pr_err("signal to child failed");
+	/*if (write(ready_fd, &go, sizeof(go)) != (ssize_t)sizeof(go))
+		pr_err("signal to child failed");*/
 }
 
 static int stop_tracing(struct writer_data *wd, struct opts *opts)
@@ -1882,23 +1977,56 @@ static void write_symbol_files(struct writer_data *wd, struct opts *opts)
 	else if (geteuid() == 0)
 		chown_directory(opts->dirname);
 }
+#include <dlfcn.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+static int listen_socket(const char *socket_path){
+	struct sockaddr_un addr;
+	int fd, cl; //client socket
+	if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		pr_err("socket error");
+	}
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path)-1);
+	unlink(socket_path);
 
-int do_main_loop(int pfd[2], int ready, struct opts *opts, int pid)
+	if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+   		pr_err("socket bind error");
+	}
+
+	if (listen(fd, 1) == -1) {
+    	pr_err("socket listen error");
+	}
+	printf("do accept\n");
+	fflush(stdout);
+	if ( (cl = accept(fd, NULL, NULL)) == -1) {
+    	pr_err("socket accept error");
+	}
+	printf("do accept\n");
+	fflush(stdout);
+
+	return cl;
+}
+
+int do_main_loop(int ready, struct opts *opts, int pid)
 {
 	int ret;
 	struct writer_data wd;
-
-	wd.pid = pid;
-	wd.pipefd = pfd[0];
-	close(pfd[1]);
 
 	setup_writers(&wd, opts);
 	start_tracing(&wd, opts, ready);
 	close(ready);
 
+	char *socket_path = "hidden.";
+	int fd = listen_socket(socket_path);
+
+	wd.pid = pid;
+	wd.pipefd = fd;
+
 	while (!uftrace_done) {
 		struct pollfd pollfd = {
-			.fd = pfd[0],
+			.fd = fd,
 			.events = POLLIN,
 		};
 
@@ -1909,12 +2037,12 @@ int do_main_loop(int pfd[2], int ready, struct opts *opts, int pid)
 			pr_err("error during poll");
 
 		if (pollfd.revents & POLLIN)
-			read_record_mmap(pfd[0], opts->dirname, opts->bufsize);
+			read_record_mmap(fd, opts->dirname, opts->bufsize);
 
 		if (pollfd.revents & (POLLERR | POLLHUP))
 			break;
 	}
-
+	
 	ret = stop_tracing(&wd, opts);
 	finish_writers(&wd, opts);
 
@@ -1922,7 +2050,7 @@ int do_main_loop(int pfd[2], int ready, struct opts *opts, int pid)
 	return ret;
 }
 
-int do_child_exec(int pfd[2], int ready, struct opts *opts,
+int do_child_exec(int ready, struct opts *opts,
 		  int argc, char *argv[])
 {
 	uint64_t dummy;
@@ -1933,13 +2061,11 @@ int do_child_exec(int pfd[2], int ready, struct opts *opts,
 			pr_dbg("disabling ASLR failed\n");
 	}
 
-	close(pfd[0]);
-
-	setup_child_environ(opts, pfd[1], argc, argv);
+	setup_child_environ(opts, argc, argv);
 
 	/* wait for parent ready */
-	if (read(ready, &dummy, sizeof(dummy)) != (ssize_t)sizeof(dummy))
-		pr_err("waiting for parent failed");
+	/*if (read(ready, &dummy, sizeof(dummy)) != (ssize_t)sizeof(dummy))
+		pr_err("waiting for parent failed");*/
 
 	/*
 	 * I don't think the traced binary is in PATH.
@@ -1951,13 +2077,9 @@ int do_child_exec(int pfd[2], int ready, struct opts *opts,
 
 int command_record(int argc, char *argv[], struct opts *opts)
 {
-	int pid;
-	int pfd[2];
+	//int pid;
 	int efd;
 	int ret = -1;
-
-	if (pipe(pfd) < 0)
-		pr_err("cannot setup internal pipe");
 
 	if (!opts->nop && create_directory(opts->dirname) < 0)
 		return -1;
@@ -1975,21 +2097,25 @@ int command_record(int argc, char *argv[], struct opts *opts)
 	if (efd < 0)
 		pr_dbg("creating eventfd failed: %d\n", efd);
 
-	pid = fork();
+	setup_child_environ(opts, argc, argv);
+	send_dlopen_msg("/home/anas/Documents/Git/uftrace/libmcount/libmcount.so", RTLD_NOW);
+	ret = do_main_loop(efd, opts, getpid());
+
+	/*pid = fork();
 	if (pid < 0)
 		pr_err("cannot start child process");
 
 	if (pid == 0) {
 		if (opts->keep_pid)
-			ret = do_main_loop(pfd, efd, opts, getppid());
+			ret = do_main_loop(efd, opts, getppid());
 		else
-			do_child_exec(pfd, efd, opts, argc, argv);
+			do_child_exec(efd, opts, argc, argv);
 		return ret;
 	}
 
 	if (opts->keep_pid)
-		do_child_exec(pfd, efd, opts, argc, argv);
+		do_child_exec(efd, opts, argc, argv);
 	else
-		ret = do_main_loop(pfd, efd, opts, pid);
+		ret = do_main_loop(efd, opts, pid);*/
 	return ret;
 }
