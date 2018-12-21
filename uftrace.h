@@ -19,6 +19,7 @@
 #define UFTRACE_FILE_VERSION_MIN  3
 #define UFTRACE_DIR_NAME     "uftrace.data"
 #define UFTRACE_DIR_OLD_NAME  "ftrace.dir"
+#define UFTRACE_SOCKET_DIR "/tmp/uftrace"
 
 #define UFTRACE_RECV_PORT  8090
 
@@ -223,6 +224,7 @@ struct opts {
 	int sort_column;
 	int nr_thread;
 	int rt_prio;
+	int attach_pid;
 	unsigned long bufsize;
 	unsigned long kernel_bufsize;
 	uint64_t threshold;

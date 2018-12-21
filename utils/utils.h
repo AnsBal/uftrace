@@ -71,6 +71,7 @@ enum debug_domain {
 	DBG_SCRIPT,
 	DBG_DWARF,
 	DBG_DOMAIN_MAX,
+	DBG_LIBLOADER
 };
 extern int dbg_domain[DBG_DOMAIN_MAX];
 
@@ -79,6 +80,13 @@ enum color_setting {
 	COLOR_AUTO,
 	COLOR_OFF,
 	COLOR_ON,
+};
+
+enum debug_level {
+	DBG_DISABLE	= 0,
+	DBG_LEVEL_1,
+	DBG_LEVEL_2,
+	DBG_LEVEL_3,
 };
 
 #define COLOR_CODE_RED      'R'
