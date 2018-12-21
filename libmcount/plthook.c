@@ -154,7 +154,52 @@ __weak struct plthook_data *mcount_arch_hook_no_plt(struct uftrace_elf_data *elf
 {
 	return NULL;
 }
+static void hook_mcount_function(struct plthook_data *pd)
+{
+	unsigned i, k;
+	struct symtab *dsymtab = &pd->dsymtab;
 
+#define SKIP_FUNC(func)  { #func }
+
+	struct {
+		const char *name;
+		void *addr;
+	} hook_list[] = {
+		SKIP_FUNC(mcount),
+		SKIP_FUNC(_mcount),
+		SKIP_FUNC(__fentry__),
+		SKIP_FUNC(__gnu_mcount_nc),
+		SKIP_FUNC(__cyg_profile_func_enter),
+		SKIP_FUNC(__cyg_profile_func_exit),
+	};
+
+#undef SKIP_FUNC
+
+	for (i = 0; i < dsymtab->nr_sym; i++) {
+		bool hooked = false;
+		//unsigned long plthook_addr;
+		//unsigned long resolved_addr;
+		struct sym *sym = dsymtab->sym_names[i];
+		printf("sym found %s\n", sym->name); fflush(stdout);
+
+		for (k = 0; k < ARRAY_SIZE(hook_list); k++) {
+			if (strcmp(sym->name, hook_list[k].name))
+				continue;
+			overwrite_pltgot(pd, 3 + i, dlsym(RTLD_NEXT, "exit"));
+
+		}
+
+		/*resolved_addr = pd->pltgot_ptr[3 + i];
+		plthook_addr = mcount_arch_plthook_addr(pd, i);
+		if (resolved_addr != plthook_addr) {
+			// save already resolved address and hook it 
+			pd->resolved_addr[i] = resolved_addr;
+			overwrite_pltgot(pd, 3 + i, (void *)plthook_addr);
+			pr_dbg2("restore [%u] %s: %p (PLT: %#lx)\n",
+				i, sym->name, resolved_addr, plthook_addr);
+		}*/
+	}
+}
 static int find_got(struct uftrace_elf_data *elf,
 		    struct uftrace_elf_iter *iter,
 		    const char *modname,
@@ -195,6 +240,7 @@ static int find_got(struct uftrace_elf_data *elf,
 
 	elf_for_each_shdr(elf, iter) {
 		char *shstr = elf_get_name(elf, iter, iter->shdr.sh_name);
+	printf("nr: %s\n", shstr);fflush(stdout);
 
 		if (strcmp(shstr, ".plt") == 0) {
 			plt_addr = iter->shdr.sh_addr + offset;
@@ -241,6 +287,8 @@ static int find_got(struct uftrace_elf_data *elf,
 
 		restore_plt_functions(pd);
 	}
+
+	hook_mcount_function(pd);
 
 	overwrite_pltgot(pd, 2, plt_hooker);
 

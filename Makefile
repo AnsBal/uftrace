@@ -126,11 +126,12 @@ include $(srcdir)/Makefile.include
 
 
 LIBMCOUNT_TARGETS := libmcount/libmcount.so libmcount/libmcount-fast.so
-LIBMCOUNT_TARGETS += libmcount/libmcount-single.so libmcount/libmcount-fast-single.so
+LIBMCOUNT_TARGETS += libmcount/libmcount-single.so libmcount/libmcount-fast-single.so 
 
 _TARGETS := uftrace libtraceevent/libtraceevent.a
 _TARGETS += $(LIBMCOUNT_TARGETS) libmcount/libmcount-nop.so
 _TARGETS += misc/demangler misc/symbols
+_TARGETS += libloader/libloader.so
 TARGETS  := $(patsubst %,$(objdir)/%,$(_TARGETS))
 
 UFTRACE_SRCS := $(srcdir)/uftrace.c $(wildcard $(srcdir)/cmds/*.c $(srcdir)/utils/*.c)
@@ -240,6 +241,9 @@ $(objdir)/libmcount/libmcount-single.so: $(LIBMCOUNT_SINGLE_OBJS) $(LIBMCOUNT_UT
 
 $(objdir)/libmcount/libmcount-fast-single.so: $(LIBMCOUNT_FAST_SINGLE_OBJS) $(LIBMCOUNT_UTILS_OBJS) $(LIBMCOUNT_ARCH_OBJS) $(LIBMCOUNT_FASTTP_OBJS)
 	$(QUIET_LINK)$(CC) -shared -o $@ $^ $(LIB_LDFLAGS)
+
+$(objdir)/libloader/libloader.so: $(wildcard $(srcdir)/libloader/*.c*)
+	@$(MAKE) -B -C $(srcdir)/libloader/
 
 $(LIBMCOUNT_FASTTP_OBJS): $(wildcard $(srcdir)/libfasttp/*.c*) $(LIBMCOUNT_DEPS) $(FASTTP_DEPS)
 	@$(MAKE) -B -C $(srcdir)/libfasttp/

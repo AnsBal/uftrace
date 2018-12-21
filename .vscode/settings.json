@@ -5,6 +5,17 @@
         "fasttp_wrapper.h": "c",
         "utils.h": "c",
         "internal.h": "c",
-        "list.h": "c"
+        "list.h": "c",
+        "unistd.h": "c",
+        "loadtracer.h": "c",
+        "pthread.h": "c",
+        "eventfd.h": "c",
+        "stdint.h": "c",
+        "symbol.h": "c",
+        "uftrace.h": "c",
+        "compiler.h": "c",
+        "dlfcn.h": "c",
+        "libloader.h": "c",
+        "mcount-arch.h": "c"
     }
 }

@@ -1334,10 +1334,11 @@ static void mcount_script_init(enum uftrace_pattern_type patt_type)
 
 	strv_free(&info.cmds);
 }
-
-static __used void mcount_startup(void)
+#include <sys/socket.h>
+#include <sys/un.h>
+static void mcount_startup(void)
 {
-	char *pipefd_str;
+	//char *pipefd_str;
 	char *logfd_str;
 	char *debug_str;
 	char *bufsize_str;
@@ -1366,7 +1367,7 @@ static __used void mcount_startup(void)
 	if (pthread_key_create(&mtd_key, mtd_dtor))
 		pr_err("cannot create mtd key");
 
-	pipefd_str = getenv("UFTRACE_PIPE");
+	//pipefd_str = getenv("UFTRACE_PIPE");
 	logfd_str = getenv("UFTRACE_LOGFD");
 	debug_str = getenv("UFTRACE_DEBUG");
 	bufsize_str = getenv("UFTRACE_BUFFER");
@@ -1412,15 +1413,33 @@ static __used void mcount_startup(void)
 
 	pr_dbg("initializing mcount library\n");
 
-	if (pipefd_str) {
+	/*if (pipefd_str) {
 		pfd = strtol(pipefd_str, NULL, 0);
 
-		/* minimal sanity check */
+		// minimal sanity check 
 		if (fstat(pfd, &statbuf) < 0 || !S_ISFIFO(statbuf.st_mode)) {
 			pr_dbg("ignore invalid pipe fd: %d\n", pfd);
 			pfd = -1;
 		}
+	}*/
+
+	struct sockaddr_un addr;
+	int fd;
+
+	if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		perror("socket error");
+		exit(-1);
 	}
+	char *socket_path = "hidden.";
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path)-1);
+
+	if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+		perror("connect error");
+		exit(-1);
+	}
+	pfd = fd;
 
 	if (getenv("UFTRACE_LIST_EVENT")) {
 		mcount_list_events();
