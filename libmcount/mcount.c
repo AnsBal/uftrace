@@ -16,6 +16,8 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "mcount"
@@ -1325,8 +1327,26 @@ static void mcount_script_init(enum uftrace_pattern_type patt_type)
 
 	strv_free(&info.cmds);
 }
-#include <sys/socket.h>
-#include <sys/un.h>
+
+static int connect_socket(char* socket_name) {
+	struct sockaddr_un addr;
+	int sock;
+
+	if ( (sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		pr_err("socket create failed");
+	}
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, socket_name, sizeof(addr.sun_path)-1);
+
+	if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
+		pr_err("socket connect failed");
+	}
+
+	return sock;
+}
+
 static void mcount_startup(void)
 {
 	//char *pipefd_str;
@@ -1346,6 +1366,7 @@ static void mcount_startup(void)
 	bool nest_libcall;
 	bool fasttp;
 	enum uftrace_pattern_type patt_type = PATT_REGEX;
+	char *uftrace_sock_path;
 
 	if (!(mcount_global_flags & MCOUNT_GFL_SETUP))
 		return;
@@ -1373,6 +1394,7 @@ static void mcount_startup(void)
 	nest_libcall = !!getenv("UFTRACE_NEST_LIBCALL");
 	pattern_str = getenv("UFTRACE_PATTERN");
 	fasttp = !!getenv("UFTRACE_FASTTP");
+	xasprintf(&uftrace_sock_path, "%s/%i", UFTRACE_SOCKET_DIR, getpid());
 
 	page_size_in_kb = getpagesize() / KB;
 
@@ -1404,33 +1426,8 @@ static void mcount_startup(void)
 
 	pr_dbg("initializing mcount library\n");
 
-	/*if (pipefd_str) {
-		pfd = strtol(pipefd_str, NULL, 0);
-
-		// minimal sanity check 
-		if (fstat(pfd, &statbuf) < 0 || !S_ISFIFO(statbuf.st_mode)) {
-			pr_dbg("ignore invalid pipe fd: %d\n", pfd);
-			pfd = -1;
-		}
-	}*/
-
-	struct sockaddr_un addr;
-	int fd;
-
-	if ( (fd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		perror("socket error");
-		exit(-1);
-	}
-	char *socket_path = "hidden.";
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_path, sizeof(addr.sun_path)-1);
-
-	if (connect(fd, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-		perror("connect error");
-		exit(-1);
-	}
-	pfd = fd;
+	pfd = connect_socket(uftrace_sock_path);
+	free(uftrace_sock_path);
 
 	if (getenv("UFTRACE_LIST_EVENT")) {
 		mcount_list_events();
@@ -1509,7 +1506,6 @@ static void mcount_cleanup(void)
 		script_finish();
 
 	unload_symtabs(&symtabs);
-
 	pr_dbg("exit from libmcount\n");
 }
 
@@ -1517,6 +1513,16 @@ static void mcount_cleanup(void)
  * external interfaces
  */
 #define UFTRACE_ALIAS(_func) void uftrace_##_func(void*, void*) __alias(_func)
+
+void __visible_default start_tracing(void)
+{
+	mcount_startup();
+}
+
+void __visible_default stop_tracing(void)
+{
+	//mcount_cleanup();
+}
 
 void __visible_default __monstartup(unsigned long low, unsigned long high)
 {

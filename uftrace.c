@@ -111,6 +111,7 @@ static struct argp_option uftrace_options[] = {
 	{ "argument", 'A', "FUNC@arg[,arg,...]", 0, "Show function arguments" },
 	{ "retval", 'R', "FUNC@retval", 0, "Show function return value" },
 	{ "patch", 'P', "FUNC", 0, "Apply dynamic patching for FUNCs" },
+	{ "pid", 'p', "NUM", 0, "The pid of the process to attach" },
 	{ "debug", 'v', 0, 0, "Print debug messages" },
 	{ "verbose", 'v', 0, 0, "Print verbose (debug) messages" },
 	{ "data", 'd', "DATA", 0, "Use this DATA instead of uftrace.data" },
@@ -491,6 +492,13 @@ static error_t parse_option(int key, char *arg, struct argp_state *state)
 
 	case 'P':
 		opts->patch = opt_add_string(opts->patch, arg);
+		break;
+
+	case 'p': 
+		opts->attach_pid = strtol(arg, NULL, 0);
+		if (opts->attach_pid < 0) {
+			pr_use("invalid pid: %s\n", arg);
+		}
 		break;
 
 	case 'E':

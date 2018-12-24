@@ -15,6 +15,7 @@
 
 struct tracepoint_handler {
 	struct list_head list;
+	char* name;
 	tracepoint* tp;
 };
 
