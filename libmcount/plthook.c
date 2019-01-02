@@ -155,6 +155,10 @@ __weak void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 {
 }
 
+__weak void mcount_arch_unhook_no_plt(struct plthook_data *pd)
+{
+}
+
 static int find_got(struct uftrace_elf_data *elf,
 		    struct uftrace_elf_iter *iter,
 		    const char *modname,
@@ -206,9 +210,11 @@ static int find_got(struct uftrace_elf_data *elf,
 	pd = xmalloc(sizeof(*pd));
 	pd->mod_name   = xstrdup(modname);
 	pd->pltgot_ptr = (void *)pltgot_addr;
+	pd->pltgot_length = 0;
 	pd->module_id  = pd->pltgot_ptr[1];
 	pd->base_addr  = offset;
 	pd->plt_addr   = plt_addr;
+	pd->plt_found = true;
 
 	pr_dbg2("module: %s (id: %lx), addr = %lx, PLTGOT = %p\n",
 		pd->mod_name, pd->module_id, pd->base_addr, pd->pltgot_ptr);
@@ -420,15 +426,29 @@ void setup_dynsym_indexes(struct plthook_data *pd)
 
 void destroy_dynsym_indexes(void)
 {
-	struct plthook_data *pd;
-
 	pr_dbg2("destroy plthook special function index\n");
 
-	list_for_each_entry(pd, &plthook_modules, list) {
+	struct plthook_data *pd, *pd_tmp;
+	list_for_each_entry_safe(pd, pd_tmp, &plthook_modules, list) {
+		
+		if(!pd->plt_found) {
+			mcount_arch_unhook_no_plt(pd);
+			munmap(pd->pltgot_ptr, pd->pltgot_length);
+		}
+
+		list_del(&pd->list);
+
 		free(pd->special_funcs);
 		pd->special_funcs = NULL;
 		pd->nr_special = 0;
+
+		free(pd->resolved_addr);
+		pd->resolved_addr = NULL;
+
+		free(pd);
+		pd = NULL;
 	}
+	INIT_LIST_HEAD(&plthook_modules);
 }
 
 static int setup_mod_plthook_data(struct dl_phdr_info *info, size_t sz, void *arg)
@@ -441,6 +461,8 @@ static int setup_mod_plthook_data(struct dl_phdr_info *info, size_t sz, void *ar
 		"libmcount-fast.so",
 		"libmcount-single.so",
 		"libmcount-fast-single.so",
+		"libdyntrace-fasttp.so",
+		"libloader.so",
 		/* system base libraries */
 		"libc.so.6",
 		"libc-2.*.so"
@@ -763,6 +785,7 @@ unsigned long plthook_entry(unsigned long *ret_addr, unsigned long child_idx,
 	rstack->nr_events  = 0;
 	rstack->event_idx  = ARGBUF_SIZE;
 
+
 	/* hijack the return address of child */
 	*ret_addr = (unsigned long)plthook_return;
 
@@ -828,11 +851,13 @@ unsigned long plthook_exit(long *retval)
 	if (!mcount_guard_recursion(mtdp))
 		return 0;
 
+
 again:
 	if (likely(mtdp->idx > 0))
 		rstack = &mtdp->rstack[mtdp->idx - 1];
 	else
 		rstack = restore_vfork(mtdp, NULL);  /* FIXME! */
+
 
 	if (unlikely(rstack->flags & (MCOUNT_FL_LONGJMP | MCOUNT_FL_VFORK))) {
 		if (rstack->flags & MCOUNT_FL_LONGJMP) {
@@ -871,8 +896,8 @@ again:
 
 	mcount_unguard_recursion(mtdp);
 
-	if (unlikely(mcount_should_stop()))
-		ret_addr = 0;
+	/*if (unlikely(mcount_should_stop()))
+		ret_addr = 0;*/
 
 	compiler_barrier();
 

@@ -6,6 +6,7 @@
 #include <sys/epoll.h>
 #include <stdlib.h>
 #include <dlfcn.h>
+#include <errno.h>
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "libloader"
@@ -27,181 +28,229 @@ static void epoll_add(int efd, int fd, unsigned event)
 	};
 
 	if (epoll_ctl(efd, EPOLL_CTL_ADD, fd, &ev) < 0)
-		pr_err("epoll add failed");
+		pr_red("epoll add failed");
 }
 
-static void recv_start_tracing_cmd(int sock, int len)
+static void send_reply(int sock, unsigned short type)
 {
-	void *buffer;
-	struct libloader_cmd_start_tracing cmd_start_tracing;
-	unsigned int cmd_env_len;
+	struct libloader_reply reply = {
+		.magic = LOADTRACER_REPLY_MAGIC,
+		.type = type,
+	};
+	struct iovec iov[1] = {
+		{ .iov_base = &reply, .iov_len = sizeof(reply), },
+	};
+	int len = sizeof(reply);
+
+	if (sock < 0)
+		return;
+
+	if (writev(sock, iov, 1) != len) {
+		pr_dbg2("send_reply couldnt write all bytes\n");
+	}
+}
+
+/* TODO use a more generic function instead (recv_exec_func) */
+static void recv_start_tracing_request(int sock, int len)
+{
+	struct libloader_request_start_tracing request_start_tracing;
 	char* libname;
+	unsigned short reply_type = LIBLODAER_SUCESS;
 
-	if (len < sizeof(cmd_start_tracing))
-			pr_err_ns("invalid message length\n");
+	if (len < sizeof(request_start_tracing)){
+		pr_red("invalid message length\n");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	if (read_all(sock, &cmd_start_tracing, sizeof(cmd_start_tracing)) < 0)
-		pr_err("recv cmd_start_tracing failed");
+	if (read_all(sock, &request_start_tracing, sizeof(request_start_tracing)) < 0) {
+		pr_red("recv request_start_tracing failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	libname = xmalloc(cmd_start_tracing.namelen + 1);
-	if (read_all(sock, libname, cmd_start_tracing.namelen) < 0)
-		pr_err("recv cmd_start_tracing failed");
-	libname[cmd_start_tracing.namelen] = '\0';
+	libname = xmalloc(request_start_tracing.namelen + 1);
+	if (read_all(sock, libname, request_start_tracing.namelen) < 0) {
+		pr_red("recv request_start_tracing failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
+	libname[request_start_tracing.namelen] = '\0';
 	
 	void* handle = dlopen(libname, RTLD_NOLOAD | RTLD_LAZY);
 	if (!handle) {
-		pr_err("start tracing failed");
+		pr_red("start tracing failed");
+		reply_type = LIBLOADER_FAILURE;
 	}
 	
 	void (*start_tracing)(void);
 	start_tracing = dlsym(handle, "start_tracing");
 	if (!start_tracing) {
-		pr_err("start tracing request failed");		
+		pr_red("start tracing request failed");		
+		reply_type = LIBLOADER_FAILURE;
 	}
 
-	pr_dbg2("cmd TRACEON: %s\n", libname);
-
-	start_tracing();
+	pr_dbg2("request TRACEON: %s\n", libname);
+	start_tracing();	
+	send_reply(sock, reply_type);
 	free(libname);
 }
 
-static void recv_stop_tracing_cmd(int sock, int len)
+static void recv_stop_tracing_request(int sock, int len)
 {
-	void *buffer;
-	struct libloader_cmd_stop_tracing cmd_stop_tracing;
-	unsigned int cmd_env_len;
+	struct libloader_request_stop_tracing request_stop_tracing;
 	char* libname;
+	unsigned short reply_type = LIBLODAER_SUCESS;
 
-	if (len < sizeof(cmd_stop_tracing))
-			pr_err_ns("invalid message length\n");
+	if (len < sizeof(request_stop_tracing)){
+		pr_red("invalid message length\n");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	if (read_all(sock, &cmd_stop_tracing, sizeof(cmd_stop_tracing)) < 0)
-		pr_err("recv cmd_stop_tracing failed");
+	if (read_all(sock, &request_stop_tracing, sizeof(request_stop_tracing)) < 0) {
+		pr_red("recv request_stop_tracing failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	libname = xmalloc(cmd_stop_tracing.namelen + 1);
-	if (read_all(sock, libname, cmd_stop_tracing.namelen) < 0)
-		pr_err("recv cmd_stop_tracing failed");
-	libname[cmd_stop_tracing.namelen] = '\0';
+	libname = xmalloc(request_stop_tracing.namelen + 1);
+	if (read_all(sock, libname, request_stop_tracing.namelen) < 0) {
+		pr_red("recv request_stop_tracing failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
+	libname[request_stop_tracing.namelen] = '\0';
 	
 	void* handle = dlopen(libname, RTLD_NOLOAD | RTLD_LAZY);
 	if (!handle) {
-		pr_err("dlclose request failed");
+		pr_red("stop tracing failed");
+		reply_type = LIBLOADER_FAILURE;
 	}
 	
 	void (*stop_tracing)(void);
 	stop_tracing = dlsym(handle, "stop_tracing");
 	if (!stop_tracing) {
-		pr_err("stop tracing request failed");		
+		pr_red("stop tracing request failed");		
+		reply_type = LIBLOADER_FAILURE;
 	}
 
-	pr_dbg2("cmd TRACEOFF: %s\n", libname);
-
+	pr_dbg2("request TRACEOFF: %s\n", libname);
 	stop_tracing();
+	send_reply(sock, reply_type);
 	free(libname);
 }
 
-static void recv_dlclose_cmd(int sock, int len)
+static void recv_dlclose_request(int sock, int len)
 {
-	void *buffer;
-	struct libloader_cmd_dlclose cmd_dlclose;
-	unsigned int cmd_env_len;
+	struct libloader_request_dlclose request_dlclose;
 	char* libname;
+	unsigned short reply_type = LIBLODAER_SUCESS;
 
-	if (len < sizeof(cmd_dlclose))
-			pr_err_ns("invalid message length\n");
+	if (len < sizeof(request_dlclose)) {
+		pr_red("invalid message length\n");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	if (read_all(sock, &cmd_dlclose, sizeof(cmd_dlclose)) < 0)
-		pr_err("recv cmd_dlclose failed");
+	if (read_all(sock, &request_dlclose, sizeof(request_dlclose)) < 0){
+		pr_red("recv request_dlclose failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	libname = xmalloc(cmd_dlclose.namelen + 1);
-	if (read_all(sock, libname, cmd_dlclose.namelen) < 0)
-		pr_err("recv cmd_dlclose failed");
-	libname[cmd_dlclose.namelen] = '\0';
+	libname = xmalloc(request_dlclose.namelen + 1);
+	if (read_all(sock, libname, request_dlclose.namelen) < 0) {
+		pr_red("recv request_dlclose failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
+	libname[request_dlclose.namelen] = '\0';
 	
 	void* handle = dlopen(libname, RTLD_NOLOAD | RTLD_LAZY);
 	if (!handle) {
-		pr_err("dlclose request failed");
+		pr_red("dlclose request failed");
+		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (dlclose(handle)) {
-		pr_err("dlclose request failed");
-	} printf("handle %p \n", handle); fflush(stdout);
-		
-	if (dlclose(handle)) {
-		pr_err("dlclose request failed");
-	}	printf("handle %p \n", handle); fflush(stdout);
-	if (dlclose(handle)) {
-		pr_err("dlclose request failed");
-	}printf("handle %p \n", handle); fflush(stdout);
-	if (dlclose(handle)) {
-		//pr_err("dlclose request failed");
-	} exit(0);
+		pr_red("dlclose request failed");
+		reply_type = LIBLOADER_FAILURE;
+	} 
 	
-	pr_dbg2("cmd DLCLOSE: %s: %p\n", libname, handle);
-
+	pr_dbg2("request DLCLOSE: %s: %p\n", libname, handle);
+	send_reply(sock, reply_type);
 	free(libname);
 }
 
-static void recv_dlopen_cmd(int sock, int len)
+static void recv_dlopen_request(int sock, int len)
 {
-	void *buffer;
-	struct libloader_cmd_dlopen cmd_dlopen;
-	unsigned int cmd_env_len;
+	struct libloader_request_dlopen request_dlopen;
 	char* libname;
+	unsigned short reply_type = LIBLODAER_SUCESS;
 
-	if (len < sizeof(cmd_dlopen))
-			pr_err_ns("invalid message length\n");
+	if (len < sizeof(request_dlopen)) {
+		pr_red("invalid message length\n");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	if (read_all(sock, &cmd_dlopen, sizeof(cmd_dlopen)) < 0)
-		pr_err("recv cmd_env failed");
+	if (read_all(sock, &request_dlopen, sizeof(request_dlopen)) < 0) {
+		pr_red("recv request_env failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	libname = xmalloc(cmd_dlopen.namelen + 1);
-	if (read_all(sock, libname, cmd_dlopen.namelen) < 0)
-		pr_err("recv cmd_env failed");
-	libname[cmd_dlopen.namelen] = '\0';
+	libname = xmalloc(request_dlopen.namelen + 1);
+	if (read_all(sock, libname, request_dlopen.namelen) < 0){
+		pr_red("recv request_env failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
+	libname[request_dlopen.namelen] = '\0';
 
-	void* handle = dlopen(libname, cmd_dlopen.flags);
+	void* handle = dlopen(libname, request_dlopen.flags);
 	if (!handle) {
-		pr_err("dlopen request failed");
+		pr_red("dlopen request failed");
+		reply_type = LIBLOADER_FAILURE;
 	}
 	
-	pr_dbg2("cmd DLOPEN: %s\n", libname);
-
+	pr_dbg2("request DLOPEN: %s\n", libname);
+	send_reply(sock, reply_type);
 	free(libname);
 }
 
-static void recv_env_cmd(int sock, int len)
+static void recv_env_request(int sock, int len)
 {
-	void *buffer;
-	struct libloader_cmd_env cmd_env;
-	unsigned int cmd_env_len;
-	char* varname;
-	char* value;
+	struct libloader_request_env request_env;
+	char *varname;
+	char *value;
+	unsigned short reply_type = LIBLODAER_SUCESS;
 
-	if (len < sizeof(cmd_env))
-			pr_err_ns("invalid message length\n");
+	if (len < sizeof(request_env)){
+		pr_red("invalid message length\n");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	if (read_all(sock, &cmd_env, sizeof(cmd_env)) < 0)
-		pr_err("recv cmd_env failed");
+	if (read_all(sock, &request_env, sizeof(request_env)) < 0){
+		pr_red("recv request_env failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	varname = xmalloc(cmd_env.len + 1);
-	if (read_all(sock, varname, cmd_env.len) < 0)
-		pr_err("recv cmd_env failed");
-	varname[cmd_env.len] = '\0';
+	varname = xmalloc(request_env.len + 1);
+	if (read_all(sock, varname, request_env.len) < 0){
+		pr_red("recv request_env failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
+	varname[request_env.len] = '\0';
 
-	if (read_all(sock, &cmd_env, sizeof(cmd_env)) < 0)
-		pr_err("recv cmd_env failed");
+	if (read_all(sock, &request_env, sizeof(request_env)) < 0){
+		pr_red("recv request_env failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	value = xmalloc(cmd_env.len + 1);
-	if (read_all(sock, value, cmd_env.len) < 0)
-		pr_err("recv cmd_env failed");
-	value[cmd_env.len] = '\0';
+	value = xmalloc(request_env.len + 1);
+	if (read_all(sock, value, request_env.len) < 0){
+		pr_red("recv request_env failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
+	value[request_env.len] = '\0';
 
-	if(setenv(varname, value, 1) == -1)
-		pr_err("setenv request failed");
+	if(setenv(varname, value, 1) == -1) {
+		pr_red("setenv request failed");
+		reply_type = LIBLOADER_FAILURE;
+	}
 
-	pr_dbg3("cmd SETENV: %s: %s \n", varname, value);
-
+	pr_dbg3("request SETENV: %s: %s \n", varname, value);
+	send_reply(sock, reply_type);
 	free(varname);
 	free(value);
 }
@@ -213,47 +262,47 @@ static void handle_server_sock(struct epoll_event *ev, int efd)
 
 	client = accept(sock, NULL, NULL);
 	if (client < 0)
-		pr_err("socket accept failed");
+		pr_red("socket accept failed");
 
 	epoll_add(efd, client, EPOLLIN);
 }
 
-static void handle_libloader_cmd(struct epoll_event *ev, int efd)
+static void handle_libloader_request(struct epoll_event *ev, int efd)
 {
 	int sock = ev->data.fd;
-	struct libloader_cmd cmd;
+	struct libloader_request request;
 
 	if (ev->events & (EPOLLERR | EPOLLHUP)) {
 		pr_dbg("client socket closed\n");
 		
 		if (epoll_ctl(efd, EPOLL_CTL_DEL, sock, NULL) < 0)
-			pr_err("epoll del failed");
+			pr_red("epoll del failed");
 
 		close(sock);
 		return;
 	}
 
-	if (read_all(sock, &cmd, sizeof(cmd)) < 0)
-		pr_err("message recv failed");
+	if (read_all(sock, &request, sizeof(request)) < 0)
+		pr_red("message recv failed");
 
-	if (cmd.magic != LOADTRACER_CMD_MAGIC)
-		pr_err_ns("invalid message\n");
+	if (request.magic != LOADTRACER_REQUEST_MAGIC)
+		pr_red("invalid message\n");
 
-	switch (cmd.type) {
+	switch (request.type) {
 		case LIBLODAER_SET_ENV:
-			recv_env_cmd(sock, cmd.len);
+			recv_env_request(sock, request.len);
 			break;
 		case LIBLOADER_DL_OPEN:
-			recv_dlopen_cmd(sock, cmd.len);
+			recv_dlopen_request(sock, request.len);
 			break;
 		case LIBLOADER_DL_CLOSE:
-			recv_dlclose_cmd(sock, cmd.len);
+			recv_dlclose_request(sock, request.len);
 			break;
 		case LIBLOADER_START_TRACING:
-			recv_start_tracing_cmd(sock, cmd.len);
+			recv_start_tracing_request(sock, request.len);
 			break;
 		case LIBLOADER_STOP_TRACING:
-			recv_stop_tracing_cmd(sock, cmd.len);
+			recv_stop_tracing_request(sock, request.len);
 			break;
 		default:
 			break;
@@ -273,19 +322,19 @@ static int listen_socket(const char *socket_path){
 	unlink(socket_path);
 
 	if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-   		pr_err("socket bind error");
+   		pr_red("socket bind error");
 		return -1;
 	}
 
 	if (listen(sock, 1) == -1) {
-    	pr_err("socket listen error");
+    	pr_red("socket listen error");
 		return -1;
 	}
 
 	return sock;
 }
 
-void *cmd_handler_thread(void *arg)
+void *request_handler_thread(void *arg)
 {
 	char *libloader_sock_path;
 
@@ -293,11 +342,10 @@ void *cmd_handler_thread(void *arg)
 	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, getpid());
 	libloader_sock = listen_socket(libloader_sock_path);
 	pr_dbg2("accepting socket : %s", libloader_sock_path);
-	free(libloader_sock_path);
 
 	libloader_efd = epoll_create1(EPOLL_CLOEXEC);
 	if (libloader_efd < 0)
-		pr_err("epoll error");
+		pr_red("epoll error");
 
 	epoll_add(libloader_efd, libloader_sock, EPOLLIN);	
 
@@ -305,20 +353,25 @@ void *cmd_handler_thread(void *arg)
 		struct epoll_event ev[10];
 		int i, len;
 
+	retry:
 		len = epoll_wait(libloader_efd, ev, 10, -1);
-		if (len < 0)
-			pr_err("epoll wait failed");
+		if (len < 0) {
+			if (errno == EINTR)
+				goto retry;
+		}
 
 		for (i = 0; i < len; i++) {
 			if (ev[i].data.fd == libloader_sock)
 				handle_server_sock(&ev[i], libloader_efd);
 			else
-				handle_libloader_cmd(&ev[i], libloader_efd);
+				handle_libloader_request(&ev[i], libloader_efd);
 		}
 	}
 
 	close(libloader_efd);
 	close(libloader_sock);
+	unlink(libloader_sock_path);
+	free(libloader_sock_path);
 
 	return NULL;
 }
@@ -333,7 +386,7 @@ static void libloader_startup(void)
 	debug = 1;
 
 	pthread_t listener_thread;
-	pthread_create(&listener_thread, NULL, cmd_handler_thread, NULL);
+	pthread_create(&listener_thread, NULL, request_handler_thread, NULL);
 	pthread_detach(listener_thread);
 }
 

@@ -238,22 +238,22 @@ static int (*real_execve)(const char *path, char *const argv[],
 static int (*real_execvpe)(const char *file, char *const argv[],
 			   char *const envp[]);
 static int (*real_fexecve)(int fd, char *const argv[], char *const envp[]);
-
+#include <dlfcn.h>
 void mcount_hook_functions(void)
 {
-	real_backtrace		= dlsym(RTLD_NEXT, "backtrace");
-	real_cxa_throw		= dlsym(RTLD_NEXT, "__cxa_throw");
-	real_cxa_rethrow	= dlsym(RTLD_NEXT, "__cxa_rethrow");
-	real_cxa_begin_catch	= dlsym(RTLD_NEXT, "__cxa_begin_catch");
-	real_cxa_end_catch	= dlsym(RTLD_NEXT, "__cxa_end_catch");
-	real_dlopen		= dlsym(RTLD_NEXT, "dlopen");
-	real_pthread_exit	= dlsym(RTLD_NEXT, "pthread_exit");
-	real_unwind_resume	= dlsym(RTLD_NEXT, "_Unwind_Resume");
-	real_posix_spawn	= dlsym(RTLD_NEXT, "posix_spawn");
-	real_posix_spawnp	= dlsym(RTLD_NEXT, "posix_spawnp");
-	real_execve		= dlsym(RTLD_NEXT, "execve");
-	real_execvpe		= dlsym(RTLD_NEXT, "execvpe");
-	real_fexecve		= dlsym(RTLD_NEXT, "fexecve");
+	real_backtrace		= dlsym(RTLD_DEFAULT, "backtrace");
+	real_cxa_throw		= dlsym(RTLD_DEFAULT, "__cxa_throw");
+	real_cxa_rethrow	= dlsym(RTLD_DEFAULT, "__cxa_rethrow");
+	real_cxa_begin_catch	= dlsym(RTLD_DEFAULT, "__cxa_begin_catch");
+	real_cxa_end_catch	= dlsym(RTLD_DEFAULT, "__cxa_end_catch");
+	real_dlopen		= dlsym(RTLD_DEFAULT, "dlopen");
+	real_pthread_exit	= dlsym(RTLD_DEFAULT, "pthread_exit");
+	real_unwind_resume	= dlsym(RTLD_DEFAULT, "_Unwind_Resume");
+	real_posix_spawn	= dlsym(RTLD_DEFAULT, "posix_spawn");
+	real_posix_spawnp	= dlsym(RTLD_DEFAULT, "posix_spawnp");
+	real_execve		= dlsym(RTLD_DEFAULT, "execve");
+	real_execvpe		= dlsym(RTLD_DEFAULT, "execvpe");
+	real_fexecve		= dlsym(RTLD_DEFAULT, "fexecve");
 }
 
 __visible_default int backtrace(void **buffer, int sz)

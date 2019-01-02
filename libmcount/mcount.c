@@ -16,7 +16,6 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 
 /* This should be defined before #include "utils.h" */
@@ -92,6 +91,10 @@ static unsigned long __maybe_unused mcount_watchpoints;
 
 /* whether caller filter is activated */
 static bool __maybe_unused mcount_has_caller;
+
+static bool mcount_toggle_cleanup = true;
+
+static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 
 #ifdef DISABLE_MCOUNT_FILTER
 
@@ -329,7 +332,7 @@ unlock:
 }
 
 /* to be used by pthread_create_key() */
-static void mtd_dtor(void *arg)
+void mtd_dtor(void *arg)
 {
 	struct mcount_thread_data *mtdp = arg;
 	struct uftrace_msg_task tmsg;
@@ -353,6 +356,9 @@ static void mtd_dtor(void *arg)
 	finish_mem_region(&mtdp->mem_regions);
 	shmem_finish(mtdp);
 
+	/* every thread needs to reset it's mtd */
+	memset(&mtd, 0, sizeof(mtd));
+
 	tmsg.pid = getpid(),
 	tmsg.tid = mcount_gettid(mtdp),
 	tmsg.time = mcount_gettime();
@@ -370,6 +376,12 @@ bool mcount_guard_recursion(struct mcount_thread_data *mtdp)
 		return false;
 	}
 
+	if (unlikely(mcount_toggle_cleanup == mtdp->toggle_cleanup)) {
+		mtdp->toggle_cleanup = !mtdp->toggle_cleanup;
+		mtd_dtor(mtdp);
+		return false;
+	}
+
 	mtdp->recursion_marker = true;
 	return true;
 }
@@ -377,9 +389,6 @@ bool mcount_guard_recursion(struct mcount_thread_data *mtdp)
 void mcount_unguard_recursion(struct mcount_thread_data *mtdp)
 {
 	mtdp->recursion_marker = false;
-
-	if (mcount_should_stop())
-		mtd_dtor(mtdp);
 }
 
 static struct sigaction old_sigact[2];
@@ -473,13 +482,13 @@ static void mcount_init_file(void)
 	       SESSION_ID_LEN, mcount_session_name(), basename(mcount_exename));
 
 	sigemptyset(&sa.sa_mask);
-	sigaction(SIGABRT, &sa, &old_sigact[0]);
-	sigaction(SIGSEGV, &sa, &old_sigact[1]);
+	//sigaction(SIGABRT, &sa, &old_sigact[0]);
+	//sigaction(SIGSEGV, &sa, &old_sigact[1]);
 }
 
 struct mcount_thread_data * mcount_prepare(void)
 {
-	static pthread_once_t once_control = PTHREAD_ONCE_INIT;
+	//static pthread_once_t once_control = PTHREAD_ONCE_INIT;
 	struct mcount_thread_data *mtdp = &mtd;
 	struct uftrace_msg_task tmsg;
 
@@ -501,7 +510,8 @@ struct mcount_thread_data * mcount_prepare(void)
 	mcount_watch_setup(mtdp);
 	mtdp->rstack = xmalloc(mcount_rstack_max * sizeof(*mtd.rstack));
 
-	pthread_once(&once_control, mcount_init_file);
+	mcount_init_file();
+	//pthread_once(&once_control, mcount_init_file);
 	prepare_shmem_buffer(mtdp);
 
 	pthread_setspecific(mtd_key, mtdp);
@@ -935,12 +945,11 @@ int mcount_entry(unsigned long *parent_loc, unsigned long child,
 	struct mcount_thread_data *mtdp;
 	struct mcount_ret_stack *rstack;
 	struct uftrace_trigger tr;
-
 	/* Access the mtd through TSD pointer to reduce TLS overhead */
 	mtdp = get_thread_data();
 	if (unlikely(check_thread_data(mtdp))) {
 		mtdp = mcount_prepare();
-		if (mtdp == NULL)
+		if (mtdp == NULL)	
 			return -1;
 	}
 	else {
@@ -994,6 +1003,7 @@ int mcount_entry(unsigned long *parent_loc, unsigned long child,
 
 	mcount_entry_filter_record(mtdp, rstack, &tr, regs);
 	mcount_unguard_recursion(mtdp);
+
 	return 0;
 }
 
@@ -1025,9 +1035,6 @@ unsigned long mcount_exit(long *retval)
 		mcount_auto_reset(mtdp);
 
 	mcount_unguard_recursion(mtdp);
-
-	if (unlikely(mcount_should_stop()))
-		retaddr = 0;
 
 	compiler_barrier();
 
@@ -1337,25 +1344,6 @@ static void mcount_script_init(enum uftrace_pattern_type patt_type)
 	strv_free(&info.cmds);
 }
 
-static int connect_socket(char* socket_name) {
-	struct sockaddr_un addr;
-	int sock;
-
-	if ( (sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		pr_err("socket create failed");
-	}
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_name, sizeof(addr.sun_path)-1);
-
-	if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-		pr_err("socket connect failed");
-	}
-
-	return sock;
-}
-
 static void mcount_startup(void)
 {
 	//char *pipefd_str;
@@ -1375,10 +1363,7 @@ static void mcount_startup(void)
 	bool nest_libcall;
 	bool fasttp;
 	enum uftrace_pattern_type patt_type = PATT_REGEX;
-	char *uftrace_sock_path;
-
-	if (!(mcount_global_flags & MCOUNT_GFL_SETUP))
-		return;
+	char *uftrace_pipe_path;
 
 	mtd.recursion_marker = true;
 
@@ -1388,7 +1373,6 @@ static void mcount_startup(void)
 	if (pthread_key_create(&mtd_key, mtd_dtor))
 		pr_err("cannot create mtd key");
 
-	//pipefd_str = getenv("UFTRACE_PIPE");
 	logfd_str = getenv("UFTRACE_LOGFD");
 	debug_str = getenv("UFTRACE_DEBUG");
 	bufsize_str = getenv("UFTRACE_BUFFER");
@@ -1403,7 +1387,7 @@ static void mcount_startup(void)
 	nest_libcall = !!getenv("UFTRACE_NEST_LIBCALL");
 	pattern_str = getenv("UFTRACE_PATTERN");
 	fasttp = !!getenv("UFTRACE_FASTTP");
-	xasprintf(&uftrace_sock_path, "%s/%i", UFTRACE_SOCKET_DIR, getpid());
+	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, getpid());
 
 	page_size_in_kb = getpagesize() / KB;
 
@@ -1435,8 +1419,9 @@ static void mcount_startup(void)
 
 	pr_dbg("initializing mcount library\n");
 
-	pfd = connect_socket(uftrace_sock_path);
-	free(uftrace_sock_path);
+	mkfifo(uftrace_pipe_path, 0755);
+	pfd = open(uftrace_pipe_path, O_RDWR);
+	free(uftrace_pipe_path);
 
 	if (getenv("UFTRACE_LIST_EVENT")) {
 		mcount_list_events();
@@ -1502,9 +1487,9 @@ static void mcount_startup(void)
 
 static void mcount_cleanup(void)
 {
-	mcount_cleanup_fasttp();
 	mcount_finish();
 	destroy_dynsym_indexes();
+	mcount_cleanup_fasttp();
 
 	pthread_key_delete(mtd_key);
 	mtd_key = -1;
@@ -1526,11 +1511,26 @@ static void mcount_cleanup(void)
 void __visible_default start_tracing(void)
 {
 	mcount_startup();
+
+	__sync_synchronize();
+	mcount_global_flags = 0UL;
 }
 
 void __visible_default stop_tracing(void)
 {
-	//mcount_cleanup();
+	mcount_toggle_cleanup = !mcount_toggle_cleanup;
+	mcount_finish();
+	destroy_dynsym_indexes();
+	mcount_cleanup_fasttp();
+
+	mcount_filter_finish();
+
+	if (SCRIPT_ENABLED && script_str)
+		script_finish();
+
+	unload_symtabs(&symtabs);
+	memset(&symtabs, 0, sizeof(symtabs));
+	symtabs.flags = SYMTAB_FL_DEMANGLE | SYMTAB_FL_ADJ_OFFSET;
 }
 
 void __visible_default __monstartup(unsigned long low, unsigned long high)
@@ -1582,7 +1582,10 @@ UFTRACE_ALIAS(__cyg_profile_func_exit);
 static void __attribute__((constructor))
 mcount_init(void)
 {
-	mcount_startup();
+	if(!getenv("UFTRACE_ATTACH")){
+		mcount_startup();
+		pr_dbg("---------constructor\n");
+	} 
 }
 
 static void __attribute__((destructor))

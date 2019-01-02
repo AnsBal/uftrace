@@ -122,6 +122,7 @@ struct mcount_thread_data {
 	struct mcount_mem_regions	mem_regions;
 	struct mcount_watchpoint	watch;
 	struct mcount_arch_context	arch;
+	bool   toggle_cleanup;
 };
 
 #ifdef HAVE_MCOUNT_ARCH_CONTEXT
@@ -281,6 +282,8 @@ struct plthook_data {
 	unsigned long			plt_addr;
 	struct symtab			dsymtab;
 	unsigned long			*pltgot_ptr;
+	unsigned long			pltgot_length;
+	bool					plt_found;
 	unsigned long			*resolved_addr;
 	struct plthook_special_func	*special_funcs;
 	int				nr_special;

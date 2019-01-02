@@ -75,18 +75,33 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 		goto out;
 	}
 
-	/* mcount must be hooked since lince libmcount is not preloaded */
+	/* mcount must be hooked since libmcount is not preloaded */
 	#define HOOK_FUNC(func)  { #func }
 		struct {
 			const char *name;
 			void *addr;
 		} mcount_hook_list[] = {
+			/* mcount functions */
 			HOOK_FUNC(mcount),
 			HOOK_FUNC(_mcount),
 			HOOK_FUNC(__fentry__),
 			HOOK_FUNC(__gnu_mcount_nc),
 			HOOK_FUNC(__cyg_profile_func_enter),
 			HOOK_FUNC(__cyg_profile_func_exit),
+			/* wrap functions */
+			HOOK_FUNC(backtrace),
+			HOOK_FUNC(__cxa_throw),
+			HOOK_FUNC(__cxa_rethrow),
+			HOOK_FUNC(dlop__cxa_begin_catchen),
+			HOOK_FUNC(__cxa_end_catch),
+			HOOK_FUNC(dlopen),
+			HOOK_FUNC(pthread_exit),
+			HOOK_FUNC(_Unwind_Resume),
+			HOOK_FUNC(posix_spawn),
+			HOOK_FUNC(posix_spawnp),
+			HOOK_FUNC(execve),
+			HOOK_FUNC(execvpe),
+			HOOK_FUNC(fexecve),
 		};
 	#undef HOOK_FUNC
 	size_t mcount_hook_nr = ARRAY_SIZE(mcount_hook_list);
@@ -100,6 +115,9 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 	}
 
 	pd->pltgot_ptr = trampoline;
+	pd->pltgot_length = tramp_len;
+	pd->plt_found = false;
+	
 	pd->resolved_addr = xcalloc(pd->dsymtab.nr_sym, sizeof(long));
 
 	/* add trampoline - save orig addr and replace GOT */
@@ -188,8 +206,48 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 	}
 
 	mprotect(trampoline, tramp_len, PROT_READ|PROT_EXEC);
+	
 	return;
 out:
 	pr_dbg2("no PLTGOT found.. ignoring...\n");
 	free(pd);
+}
+
+void mcount_arch_unhook_no_plt(struct plthook_data *pd)
+{
+	uint32_t i, j;
+
+	for (i = 0; i < pd->dsymtab.nr_sym; i++) {
+		Elf64_Rela *rela;
+		struct sym *sym;
+		bool skip = false;
+		unsigned long relro_start = 0;
+		unsigned long relro_size = 0;
+		unsigned long page_size;
+
+		sym = &pd->dsymtab.sym[i];
+
+		for (j = 0; j < plt_skip_nr; j++) {
+			if (!strcmp(sym->name, plt_skip_syms[j].name)) {
+				skip = true;
+				break;
+			}
+		}
+		if (skip)
+			continue;
+
+		rela = (void*)sym->addr;
+		
+		page_size = getpagesize();
+
+		relro_start = rela->r_offset + pd->base_addr;
+		relro_size  = sizeof(long);
+
+		relro_start &= ~(page_size - 1);
+		relro_size   = ALIGN(relro_size, page_size);
+
+		mprotect((void *)relro_start, relro_size, PROT_READ | PROT_WRITE);
+		__atomic_store((long*)(rela->r_offset + pd->base_addr), &pd->resolved_addr[i], __ATOMIC_SEQ_CST);
+		mprotect((void *)relro_start, relro_size, PROT_READ);
+	}
 }

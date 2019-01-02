@@ -993,6 +993,8 @@ void load_module_symtabs(struct symtabs *symtabs)
 		"libmcount-fast.so",
 		"libmcount-single.so",
 		"libmcount-fast-single.so",
+		"libdyntrace-fasttp.so",
+		"libloader.so",
 	};
 	static const char libstdcpp6[] = "libstdc++.so.6";
 	size_t k;

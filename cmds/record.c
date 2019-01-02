@@ -174,7 +174,7 @@ static void setup_child_environ(struct opts *opts,
 		char *filter_str = uftrace_clear_kernel(opts->filter);
 
 		if (filter_str) {
-			send_env_cmd(sock, "UFTRACE_FILTER", filter_str);
+			send_env_request(sock, "UFTRACE_FILTER", filter_str);
 			free(filter_str);
 		}
 	}
@@ -183,7 +183,7 @@ static void setup_child_environ(struct opts *opts,
 		char *trigger_str = uftrace_clear_kernel(opts->trigger);
 
 		if (trigger_str) {
-			send_env_cmd(sock, "UFTRACE_TRIGGER", trigger_str);
+			send_env_request(sock, "UFTRACE_TRIGGER", trigger_str);
 			free(trigger_str);
 		}
 	}
@@ -192,7 +192,7 @@ static void setup_child_environ(struct opts *opts,
 		char *arg_str = uftrace_clear_kernel(opts->args);
 
 		if (arg_str) {
-			send_env_cmd(sock, "UFTRACE_ARGUMENT", arg_str);
+			send_env_request(sock, "UFTRACE_ARGUMENT", arg_str);
 			free(arg_str);
 		}
 	}
@@ -201,23 +201,23 @@ static void setup_child_environ(struct opts *opts,
 		char *retval_str = uftrace_clear_kernel(opts->retval);
 
 		if (retval_str) {
-			send_env_cmd(sock, "UFTRACE_RETVAL", retval_str);
+			send_env_request(sock, "UFTRACE_RETVAL", retval_str);
 			free(retval_str);
 		}
 	}
 
 	if (opts->auto_args)
-		send_env_cmd(sock, "UFTRACE_AUTO_ARGS", "1");
+		send_env_request(sock, "UFTRACE_AUTO_ARGS", "1");
 
 	if(opts->fasttp) {
-		send_env_cmd(sock, "UFTRACE_FASTTP", "1");
+		send_env_request(sock, "UFTRACE_FASTTP", "1");
 	}
 
 	if (opts->patch) {
 		char *patch_str = uftrace_clear_kernel(opts->patch);
 
 		if (patch_str) {
-			send_env_cmd(sock, "UFTRACE_PATCH", patch_str);
+			send_env_request(sock, "UFTRACE_PATCH", patch_str);
 			free(patch_str);
 		}
 	}
@@ -226,92 +226,92 @@ static void setup_child_environ(struct opts *opts,
 		char *event_str = uftrace_clear_kernel(opts->event);
 
 		if (event_str) {
-			send_env_cmd(sock, "UFTRACE_EVENT", event_str);
+			send_env_request(sock, "UFTRACE_EVENT", event_str);
 			free(event_str);
 		}
 	}
 
 	if (opts->watch)
-		send_env_cmd(sock, "UFTRACE_WATCH", opts->watch);
+		send_env_request(sock, "UFTRACE_WATCH", opts->watch);
 
 	if (opts->depth != OPT_DEPTH_DEFAULT) {
 		snprintf(buf, sizeof(buf), "%d", opts->depth);
-		send_env_cmd(sock, "UFTRACE_DEPTH", buf);
+		send_env_request(sock, "UFTRACE_DEPTH", buf);
 	}
 
 	if (opts->max_stack != OPT_RSTACK_DEFAULT) {
 		snprintf(buf, sizeof(buf), "%d", opts->max_stack);
-		send_env_cmd(sock, "UFTRACE_MAX_STACK", buf);
+		send_env_request(sock, "UFTRACE_MAX_STACK", buf);
 	}
 
 	if (opts->threshold) {
 		snprintf(buf, sizeof(buf), "%"PRIu64, opts->threshold);
-		send_env_cmd(sock, "UFTRACE_THRESHOLD", buf);
+		send_env_request(sock, "UFTRACE_THRESHOLD", buf);
 	}
 
 	if (opts->caller) {
 		char *caller_str = uftrace_clear_kernel(opts->caller);
 
 		if (caller_str) {
-			send_env_cmd(sock, "UFTRACE_CALLER", caller_str);
+			send_env_request(sock, "UFTRACE_CALLER", caller_str);
 			free(caller_str);
 		}
 	}
 
 	if (opts->libcall) {
-		send_env_cmd(sock, "UFTRACE_PLTHOOK", "1");
+		send_env_request(sock, "UFTRACE_PLTHOOK", "1");
 
 		if (opts->want_bind_not) {
 			/* do not update GOTPLT after resolving symbols */
-			send_env_cmd(sock, "LD_BIND_NOT", "1");
+			send_env_request(sock, "LD_BIND_NOT", "1");
 		}
 
 		if (opts->nest_libcall)
-			send_env_cmd(sock, "UFTRACE_NEST_LIBCALL", "1");
+			send_env_request(sock, "UFTRACE_NEST_LIBCALL", "1");
 	}
 
 	if (strcmp(opts->dirname, UFTRACE_DIR_NAME))
-		send_env_cmd(sock, "UFTRACE_DIR", opts->dirname);
+		send_env_request(sock, "UFTRACE_DIR", opts->dirname);
 
 	if (opts->bufsize != SHMEM_BUFFER_SIZE) {
 		snprintf(buf, sizeof(buf), "%lu", opts->bufsize);
-		send_env_cmd(sock, "UFTRACE_BUFFER", buf);
+		send_env_request(sock, "UFTRACE_BUFFER", buf);
 	}
 
 	if (opts->logfile) {
 		snprintf(buf, sizeof(buf), "%d", fileno(logfp));
-		send_env_cmd(sock, "UFTRACE_LOGFD", buf);
+		send_env_request(sock, "UFTRACE_LOGFD", buf);
 	}
 		
-	send_env_cmd(sock, "UFUFTRACE_SHMEMTRACE_LOGFD", "1");
+	send_env_request(sock, "UFUFTRACE_SHMEMTRACE_LOGFD", "1");
 
 	if (debug) {
 		snprintf(buf, sizeof(buf), "%d", debug);
-		send_env_cmd(sock, "UFTRACE_DEBUG", buf);
-		send_env_cmd(sock, "UFTRACE_DEBUG_DOMAIN", build_debug_domain_string());
+		send_env_request(sock, "UFTRACE_DEBUG", buf);
+		send_env_request(sock, "UFTRACE_DEBUG_DOMAIN", build_debug_domain_string());
 	}
 
 	if (opts->disabled)
-		send_env_cmd(sock, "UFTRACE_DISABLED", "1");
+		send_env_request(sock, "UFTRACE_DISABLED", "1");
 
 	if (log_color == COLOR_ON) {
 		snprintf(buf, sizeof(buf), "%d", log_color);
-		send_env_cmd(sock, "UFTRACE_COLOR", buf);
+		send_env_request(sock, "UFTRACE_COLOR", buf);
 	}
 
 	snprintf(buf, sizeof(buf), "%d", demangler);
-	send_env_cmd(sock, "UFTRACE_DEMANGLE", buf);
+	send_env_request(sock, "UFTRACE_DEMANGLE", buf);
 
 
 	if ((opts->kernel || has_kernel_event(opts->event)) &&
 	    check_kernel_pid_filter())
-		send_env_cmd(sock, "UFTRACE_KERNEL_PID_UPDATE", "1");
+		send_env_request(sock, "UFTRACE_KERNEL_PID_UPDATE", "1");
 
 	if (opts->script_file)
-		send_env_cmd(sock, "UFTRACE_SCRIPT", opts->script_file);
+		send_env_request(sock, "UFTRACE_SCRIPT", opts->script_file);
 
 	if (opts->patt_type != PATT_REGEX)
-		send_env_cmd(sock, "UFTRACE_PATTERN", get_filter_pattern(opts->patt_type));
+		send_env_request(sock, "UFTRACE_PATTERN", get_filter_pattern(opts->patt_type));
 
 	if (argc > 0) {
 		char *args = NULL;
@@ -320,7 +320,7 @@ static void setup_child_environ(struct opts *opts,
 		for (i = 0; i < argc; i++)
 			args = strjoin(args, argv[i], "\n");
 
-		send_env_cmd(sock, "UFTRUFTRACE_PATTERNACE_DEMANGLE", get_filter_pattern(opts->patt_type));
+		send_env_request(sock, "UFTRUFTRACE_PATTERNACE_DEMANGLE", get_filter_pattern(opts->patt_type));
 		free(args);
 	}
 
@@ -332,13 +332,15 @@ static void setup_child_environ(struct opts *opts,
 		char *preload = xmalloc(len);
 
 		snprintf(preload, len, "%s:%s", libmcountpath, old_preload);
-		send_env_cmd(sock, "LD_PRELOAD", preload);
+		send_env_request(sock, "LD_PRELOAD", preload);
 		free(preload);
 	}
 	else
-		send_env_cmd(sock, "LD_PRELOAD", libmcountpath);
+		send_env_request(sock, "LD_PRELOAD", libmcountpath);
 
-	send_env_cmd(sock, "XRAY_OPTIONS", "patch_premain=false");
+	send_env_request(sock, "XRAY_OPTIONS", "patch_premain=false");
+
+	send_env_request(sock, "UFTRACE_ATTACH", "1");
 }
 
 static uint64_t calc_feat_mask(struct opts *opts)
@@ -1900,54 +1902,32 @@ static int connect_socket(char* socket_name) {
 	return sock;
 }
 
-static int accept_socket(const char *socket_name){
-	struct sockaddr_un addr;
-	int sock, client_sock;
-	if ( (sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		pr_err("socket error");
-	}
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_name, sizeof(addr.sun_path)-1);
-	unlink(socket_name);
-
-	if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-   		pr_err("socket bind error");
-	}
-
-	if (listen(sock, 1) == -1) {
-    	pr_err("socket listen error");
-	}
-
-	if ( (client_sock = accept(sock, NULL, NULL)) == -1) {
-    	pr_err("socket accept error");
-	}
-
-	return client_sock;
-}
-
-int do_main_loop(int ready, struct opts *opts, int pid, char *libmcountpath)
+int do_main_loop(int ready, struct opts *opts, int pid, char *libmcountpath, int loader_sock)
 {
 	int ret;
 	struct writer_data wd;
-	char *uftrace_socket_path;
+	char *uftrace_pipe_path;
+	int pfd;
+
+	mkdir(UFTRACE_PIPE_DIR, 0755);
+	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, opts->attach_pid);
+	mkfifo(uftrace_pipe_path, 0755);
+	pfd = open(uftrace_pipe_path, O_RDWR);
+
+	/* TODO fix the mcount and uftrace synchronisation*/
+	send_dlopen_request(loader_sock, libmcountpath, RTLD_LAZY);
+	send_start_tracing_request(loader_sock, libmcountpath);
 
 	setup_writers(&wd, opts);
 	start_tracing(&wd, opts, ready);
 	close(ready);
 
-	mkdir(UFTRACE_SOCKET_DIR, 0755);
-	xasprintf(&uftrace_socket_path, "%s/%i", UFTRACE_SOCKET_DIR, opts->attach_pid);
-
-	int fd = accept_socket(uftrace_socket_path);
-	free(uftrace_socket_path);
-
 	wd.pid = pid;
-	wd.pipefd = fd;
+	wd.pipefd = pfd;
 
 	while (!uftrace_done) {
 		struct pollfd pollfd = {
-			.fd = fd,
+			.fd = pfd,
 			.events = POLLIN,
 		};
 
@@ -1958,18 +1938,23 @@ int do_main_loop(int ready, struct opts *opts, int pid, char *libmcountpath)
 			pr_err("error during poll");
 
 		if (pollfd.revents & POLLIN)
-			read_record_mmap(fd, opts->dirname, opts->bufsize);
+			read_record_mmap(pfd, opts->dirname, opts->bufsize);
 
 		if (pollfd.revents & (POLLERR | POLLHUP))
 			break;
 	}
-	send_stop_tracing_cmd(fd, libmcountpath);
 	
+	send_stop_tracing_request(loader_sock, libmcountpath);
+	//send_dlclose_request(pfd, libmcountpath); 
+
 	ret = stop_tracing(&wd, opts);
 	finish_writers(&wd, opts);
 
-
 	write_symbol_files(&wd, opts);
+
+	close(pfd);
+	unlink(uftrace_pipe_path);
+
 	return ret;
 }
 
@@ -2017,30 +2002,25 @@ int command_record(int argc, char *argv[], struct opts *opts)
 	check_binary(opts);
 	check_perf_event(opts);
 
-	fflush(stdout);
-
 	efd = eventfd(0, EFD_CLOEXEC | EFD_SEMAPHORE);
 	if (efd < 0)
 		pr_dbg("creating eventfd failed: %d\n", efd);
 
 	/* TODO inject libloader in target */
 	int loader_sock = connect_socket(libloader_sock_path);
-	free(libloader_sock_path);
+	pr_dbg("Connected to libloader socket successfully\n");
 
-	/* TODO send libmcountpath to setup_child_environ and do main_loop */
 	char *libmcountpath = get_libmcount_path(opts);
 	if (libmcountpath == NULL)
 		pr_err_ns("cannot find libmcount.so\n");
 	
 	setup_child_environ(opts, argc, argv, loader_sock, libmcountpath);
-
-	/* TODO fix the mcount and uftrace synchronisation*/
-	send_dlopen_cmd(loader_sock, libmcountpath, RTLD_LAZY);
-	send_start_tracing_cmd(loader_sock, libmcountpath);
-	
-	ret = do_main_loop(efd, opts, getpid(), libmcountpath);
+	ret = do_main_loop(efd, opts, getpid(), libmcountpath, loader_sock);
 
 	put_libmcount_path(libmcountpath);
+	free(libloader_sock_path);
+	close(loader_sock);
+	
 	/*pid = fork();
 	if (pid < 0)
 		pr_err("cannot start child process");
