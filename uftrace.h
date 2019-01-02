@@ -18,7 +18,7 @@
 #define UFTRACE_FILE_VERSION_MIN  3
 #define UFTRACE_DIR_NAME     "uftrace.data"
 #define UFTRACE_DIR_OLD_NAME  "ftrace.dir"
-#define UFTRACE_SOCKET_DIR "/tmp/uftrace"
+#define UFTRACE_PIPE_DIR "/tmp/uftrace"
 
 #define UFTRACE_RECV_PORT  8090
 

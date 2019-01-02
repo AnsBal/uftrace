@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/uio.h>
+#include <errno.h>
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "mcount"
@@ -98,7 +99,11 @@ void uftrace_send_message(int type, void *data, size_t len)
 		return;
 
 	len += sizeof(msg);
+
+retry:
 	if (writev(pfd, iov, 2) != (ssize_t)len) {
+		if(errno = EINTR)
+			goto retry;
 		if (!mcount_should_stop())
 			pr_err("writing shmem name to pipe");
 	}

@@ -2,7 +2,7 @@
 #include <link.h>
 
 /* This should be defined before #include "utils.h" */
-#define PR_FMT     "dynamic-fasttp"
+#define PR_FMT     "fasttp"
 #define PR_DOMAIN  DBG_DYNAMIC
 
 #include "libmcount/mcount.h"
@@ -15,8 +15,8 @@
 
 struct tracepoint_handler {
 	struct list_head list;
-	char* name;
 	tracepoint* tp;
+	char name[];
 };
 
 static LIST_HEAD(tracepoint_list);
@@ -49,11 +49,15 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 				continue;
 
 			struct tracepoint_handler* tracepoint_h;
-			tracepoint_h = xmalloc(sizeof(*tracepoint_h));
+
+			tracepoint_h = xmalloc(sizeof(*tracepoint_h) + strlen(sym->name) + 1);
 			tracepoint_h->tp = new_tracepoint((void*) sym->addr);
+			strcpy(tracepoint_h->name, sym->name);
 			
 			INIT_LIST_HEAD(&tracepoint_h->list);
 			list_add(&tracepoint_h->list, &tracepoint_list);
+
+			pr_dbg2("inserted fasttp tracepoint in symbol: %s \n", tracepoint_h->name);
 		}
 
 		free_filter_pattern(&patt);
@@ -63,11 +67,20 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 	return ret;
 }
 
+static void free_tracepoint_handler(struct tracepoint_handler *tracepoint_h) 
+{
+	delete_tracepoint(tracepoint_h->tp);
+	free(tracepoint_h);
+}
+
+/* FIXME Invalid return address, SHOULD NOT HAPPEN */
 void mcount_cleanup_fasttp()
 {
-	struct tracepoint_handler *tracepoint_h;
-	list_for_each_entry(tracepoint_h, &tracepoint_list, list) {
-		delete_tracepoint(tracepoint_h->tp);
-		free(tracepoint_h);
+	struct tracepoint_handler *tracepoint_h, *tracepoint_h_tmp;
+	list_for_each_entry_safe(tracepoint_h, tracepoint_h_tmp, &tracepoint_list, list) {
+		pr_dbg2("removed fasttp tracepoint from symbol: %s \n", tracepoint_h->name);
+		list_del(&tracepoint_h->list);
+		free_tracepoint_handler(tracepoint_h);
 	}
+	INIT_LIST_HEAD(&tracepoint_list);
 }

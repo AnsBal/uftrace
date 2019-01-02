@@ -16,7 +16,6 @@
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
-#include <sys/socket.h>
 #include <sys/un.h>
 
 /* This should be defined before #include "utils.h" */
@@ -322,6 +321,7 @@ unlock:
 /* to be used by pthread_create_key() */
 static void mtd_dtor(void *arg)
 {
+	pr_blue("------------- destor\n");
 	struct mcount_thread_data *mtdp = arg;
 	struct uftrace_msg_task tmsg;
 
@@ -486,16 +486,21 @@ struct mcount_thread_data * mcount_prepare(void)
 	if (!mcount_guard_recursion(mtdp))
 		return NULL;
 
+	pr_blue("mcount_prepare\n");
+
 	compiler_barrier();
 
 	mcount_filter_setup(mtdp);
 	mcount_watch_setup(mtdp);
 	mtdp->rstack = xmalloc(mcount_rstack_max * sizeof(*mtd.rstack));
 
-	pthread_once(&once_control, mcount_init_file);
+	mcount_init_file();
+	//pthread_once(&once_control, mcount_init_file);
 	prepare_shmem_buffer(mtdp);
+	pr_blue("mtd_key %p\n", mtdp);
 
 	pthread_setspecific(mtd_key, mtdp);
+	pr_blue("mtd_key %p\n", mtdp);
 
 	/* time should be get after session message sent */
 	tmsg.pid = getpid(),
@@ -1328,25 +1333,6 @@ static void mcount_script_init(enum uftrace_pattern_type patt_type)
 	strv_free(&info.cmds);
 }
 
-static int connect_socket(char* socket_name) {
-	struct sockaddr_un addr;
-	int sock;
-
-	if ( (sock = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		pr_err("socket create failed");
-	}
-
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, socket_name, sizeof(addr.sun_path)-1);
-
-	if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-		pr_err("socket connect failed");
-	}
-
-	return sock;
-}
-
 static void mcount_startup(void)
 {
 	//char *pipefd_str;
@@ -1366,10 +1352,13 @@ static void mcount_startup(void)
 	bool nest_libcall;
 	bool fasttp;
 	enum uftrace_pattern_type patt_type = PATT_REGEX;
-	char *uftrace_sock_path;
+	char *uftrace_pipe_path;
 
-	if (!(mcount_global_flags & MCOUNT_GFL_SETUP))
-		return;
+	/* FIXME what if a thread found that this is set and 
+		does mtd_dtor then mcount_trace_finish ?
+	*/
+	//if (!(mcount_global_flags & MCOUNT_GFL_SETUP))
+	//	return;
 
 	mtd.recursion_marker = true;
 
@@ -1394,7 +1383,7 @@ static void mcount_startup(void)
 	nest_libcall = !!getenv("UFTRACE_NEST_LIBCALL");
 	pattern_str = getenv("UFTRACE_PATTERN");
 	fasttp = !!getenv("UFTRACE_FASTTP");
-	xasprintf(&uftrace_sock_path, "%s/%i", UFTRACE_SOCKET_DIR, getpid());
+	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, /*getpid()*/1);
 
 	page_size_in_kb = getpagesize() / KB;
 
@@ -1426,8 +1415,9 @@ static void mcount_startup(void)
 
 	pr_dbg("initializing mcount library\n");
 
-	pfd = connect_socket(uftrace_sock_path);
-	free(uftrace_sock_path);
+	mkfifo(uftrace_pipe_path, 0755);
+	pfd = open(uftrace_pipe_path, O_RDWR);
+	free(uftrace_pipe_path);
 
 	if (getenv("UFTRACE_LIST_EVENT")) {
 		mcount_list_events();
@@ -1493,9 +1483,9 @@ static void mcount_startup(void)
 
 static void mcount_cleanup(void)
 {
-	mcount_cleanup_fasttp();
 	mcount_finish();
 	destroy_dynsym_indexes();
+	mcount_cleanup_fasttp();
 
 	pthread_key_delete(mtd_key);
 	mtd_key = -1;
@@ -1521,6 +1511,10 @@ void __visible_default start_tracing(void)
 
 void __visible_default stop_tracing(void)
 {
+	//mcount_finish();
+
+	mcount_cleanup_fasttp();
+
 	//mcount_cleanup();
 }
 
@@ -1573,7 +1567,10 @@ UFTRACE_ALIAS(__cyg_profile_func_exit);
 static void __attribute__((constructor))
 mcount_init(void)
 {
-	mcount_startup();
+	if(!getenv("UFTRACE_ATTACH")){
+		mcount_startup();
+		pr_dbg("---------constructor\n");
+	} 
 }
 
 static void __attribute__((destructor))

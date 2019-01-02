@@ -81,12 +81,27 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 			const char *name;
 			void *addr;
 		} mcount_hook_list[] = {
+			/* mcount functions */
 			HOOK_FUNC(mcount),
 			HOOK_FUNC(_mcount),
 			HOOK_FUNC(__fentry__),
 			HOOK_FUNC(__gnu_mcount_nc),
 			HOOK_FUNC(__cyg_profile_func_enter),
 			HOOK_FUNC(__cyg_profile_func_exit),
+			/* wrap functions */
+			HOOK_FUNC(backtrace),
+			HOOK_FUNC(__cxa_throw),
+			HOOK_FUNC(__cxa_rethrow),
+			HOOK_FUNC(dlop__cxa_begin_catchen),
+			HOOK_FUNC(__cxa_end_catch),
+			HOOK_FUNC(dlopen),
+			HOOK_FUNC(pthread_exit),
+			HOOK_FUNC(_Unwind_Resume),
+			HOOK_FUNC(posix_spawn),
+			HOOK_FUNC(posix_spawnp),
+			HOOK_FUNC(execve),
+			HOOK_FUNC(execvpe),
+			HOOK_FUNC(fexecve),
 		};
 	#undef HOOK_FUNC
 	size_t mcount_hook_nr = ARRAY_SIZE(mcount_hook_list);

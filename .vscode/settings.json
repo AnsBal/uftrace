@@ -16,6 +16,7 @@
         "compiler.h": "c",
         "dlfcn.h": "c",
         "libloader.h": "c",
-        "mcount-arch.h": "c"
+        "mcount-arch.h": "c",
+        "link.h": "c"
     }
 }

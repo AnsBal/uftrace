@@ -238,7 +238,7 @@ static int (*real_execve)(const char *path, char *const argv[],
 static int (*real_execvpe)(const char *file, char *const argv[],
 			   char *const envp[]);
 static int (*real_fexecve)(int fd, char *const argv[], char *const envp[]);
-
+#include <dlfcn.h>
 void mcount_hook_functions(void)
 {
 	real_backtrace		= dlsym(RTLD_NEXT, "backtrace");
@@ -279,6 +279,7 @@ __visible_default int backtrace(void **buffer, int sz)
 __visible_default void __cxa_throw(void *exception, void *type, void *dest)
 {
 	struct mcount_thread_data *mtdp;
+	pr_blue("calling __cxa_throw libmcount\n");
 
 	if (unlikely(real_cxa_throw == NULL))
 		mcount_hook_functions();
@@ -392,6 +393,7 @@ __visible_default void * dlopen(const char *filename, int flags)
 		.timestamp = mcount_gettime(),
 	};
 	void *ret;
+	pr_blue("calling dlopen libmcount\n");
 
 	/*
 	 * get timestamp before calling dlopen() so that
