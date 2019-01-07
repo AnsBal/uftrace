@@ -321,7 +321,7 @@ unlock:
 /* to be used by pthread_create_key() */
 static void mtd_dtor(void *arg)
 {
-	pr_blue("------------- destor\n");
+	pr_blue("mtd_dtor\n");
 	struct mcount_thread_data *mtdp = arg;
 	struct uftrace_msg_task tmsg;
 
@@ -353,10 +353,13 @@ static void mtd_dtor(void *arg)
 
 bool mcount_guard_recursion(struct mcount_thread_data *mtdp)
 {
+	pr_blue("mcount_guard_recursion\n");
+
 	if (unlikely(mtdp->recursion_marker))
 		return false;
 
 	if (unlikely(mcount_should_stop())) {
+		pr_blue("mcount_guard_recursion mcount_should_stop\n");
 		mtd_dtor(mtdp);
 		return false;
 	}
@@ -474,6 +477,10 @@ struct mcount_thread_data * mcount_prepare(void)
 	struct mcount_thread_data *mtdp = &mtd;
 	struct uftrace_msg_task tmsg;
 
+	memset(&mtd, 0, sizeof(mtd));
+
+	pr_blue("mcount_prepare\n");
+
 	if (unlikely(mcount_should_stop()))
 		return NULL;
 
@@ -485,8 +492,6 @@ struct mcount_thread_data * mcount_prepare(void)
 	 */
 	if (!mcount_guard_recursion(mtdp))
 		return NULL;
-
-	pr_blue("mcount_prepare\n");
 
 	compiler_barrier();
 
@@ -510,12 +515,14 @@ struct mcount_thread_data * mcount_prepare(void)
 	uftrace_send_message(UFTRACE_MSG_TASK_START, &tmsg, sizeof(tmsg));
 
 	update_kernel_tid(tmsg.tid);
+	pr_blue("mcount_prepare finished\n");
 
 	return mtdp;
 }
 
 static void mcount_finish(void)
 {
+	pr_blue("mcount_finish\n");
 	if (!mcount_should_stop())
 		mcount_trace_finish(false);
 
@@ -932,6 +939,8 @@ int mcount_entry(unsigned long *parent_loc, unsigned long child,
 	struct mcount_ret_stack *rstack;
 	struct uftrace_trigger tr;
 
+	//pr_blue("mcount_entry\n");
+
 	/* Access the mtd through TSD pointer to reduce TLS overhead */
 	mtdp = get_thread_data();
 	if (unlikely(check_thread_data(mtdp))) {
@@ -998,6 +1007,8 @@ unsigned long mcount_exit(long *retval)
 	struct mcount_thread_data *mtdp;
 	struct mcount_ret_stack *rstack;
 	unsigned long retaddr;
+
+	pr_blue("mcount_exit\n");
 
 	mtdp = get_thread_data();
 	assert(mtdp != NULL);
@@ -1507,11 +1518,14 @@ static void mcount_cleanup(void)
 void __visible_default start_tracing(void)
 {
 	mcount_startup();
+
+	__sync_synchronize();
+	mcount_global_flags = 0UL;
 }
 
 void __visible_default stop_tracing(void)
 {
-	//mcount_finish();
+	mcount_finish();
 
 	mcount_cleanup_fasttp();
 

@@ -165,6 +165,8 @@ extern unsigned long mcount_global_flags;
 
 static inline bool mcount_should_stop(void)
 {
+	pr_blue("mcount_should_stop\n");
+
 	return mcount_global_flags != 0UL;
 }
 
