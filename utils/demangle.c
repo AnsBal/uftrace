@@ -1,40 +1,11 @@
 /*
  * Very simple (and incomplete by design) C++ name demangler.
  *
- * Copyright (C) 2015-2019, LG Electronics, Namhyung Kim <namhyung.kim@lge.com>
+ * Copyright (C) 2015-2018, LG Electronics, Namhyung Kim <namhyung.kim@lge.com>
  *
- * Released under the GPL v2 license (the C++ part).
+ * Released under the GPL v2.
  *
  * See https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
- *
- * Rust demangler refered to https://github.com/alexcrichton/rustc-demangle
- * which was released by MIT (or Apache) license.
- *
- * Copyright (c) 2014 Alex Crichton
- *
- * Permission is hereby granted, free of charge, to any
- * person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the
- * Software without restriction, including without
- * limitation the rights to use, copy, modify, merge,
- * publish, distribute, sublicense, and/or sell copies of
- * the Software, and to permit persons to whom the Software
- * is furnished to do so, subject to the following
- * conditions:
- *
- * The above copyright notice and this permission notice
- * shall be included in all copies or substantial portions
- * of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
- * ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
- * TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
- * PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
- * SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
- * OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
- * IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
  */
 
 #include <stdlib.h>
@@ -64,7 +35,6 @@ struct demangle_data {
 	int level;
 	int type;
 	int nr_dbg;
-	int type_info;
 	const char *debug[MAX_DEBUG_DEPTH];
 };
 
@@ -251,7 +221,7 @@ static const struct {
 	{ 'x', "long long" },
 	{ 'y', "unsigned long long" },
 	{ 'n', "__int128" },
-	{ 'o', "unsigned __int128" },
+	{ '0', "unsigned __int128" },
 	{ 'f', "float" },
 	{ 'd', "double" },
 	{ 'e', "long double" },
@@ -270,32 +240,6 @@ static const struct {
 	{ 'i', "std::basic_istream" },
 	{ 'o', "std::basic_ostream" },
 	{ 'd', "std::basic_iostream" },
-};
-
-static const struct {
-	char *code;  /* surrounded by $..$ */
-	char *punc;
-} rust_mappings[] = {
-	{ "SP", "@" },
-	{ "BP", "*" },
-	{ "RF", "&" },
-	{ "LT", "<" },
-	{ "GT", ">" },
-	{ "LP", "(" },
-	{ "RP", ")" },
-	{ "C",  "," },
-	/* some selected unicode characters */
-	{ "u20", " " },
-	{ "u22", "\"" },
-	{ "u27", "'" },
-	{ "u2b", "+" },
-	{ "u3b", ";" },
-	{ "u3d", "=" },
-	{ "u5b", "[" },
-	{ "u5d", "]" },
-	{ "u7b", "{" },
-	{ "u7d", "}" },
-	{ "u7e", "~" },
 };
 
 static int dd_encoding(struct demangle_data *dd);
@@ -456,7 +400,7 @@ static int dd_substitution(struct demangle_data *dd)
 	for (i = 0; i < ARRAY_SIZE(std_abbrevs); i++) {
 		if (c == std_abbrevs[i].code) {
 			__dd_consume(dd, NULL);
-			if (dd->type == 0 || dd->type_info)
+			if (dd->type == 0)
 				dd_append(dd, std_abbrevs[i].name);
 
 			if (dd_curr(dd) == 'B')
@@ -1163,26 +1107,13 @@ static int dd_special_name(struct demangle_data *dd)
 	char c0 = dd_curr(dd);
 	char c1 = dd_peek(dd, 1);
 	char T_type[] = "VTISFJ";
-	char *T_type_name[] = { "virtual", "VTT", "typeinfo_name", "typeinfo",
-				"typeinfo_fn", "java_class" };
 
 	if (dd_eof(dd))
 		return -1;
 
 	if (c0 == 'T') {
 		if (strchr(T_type, c1)) {
-			int idx;
-			char *p;
-
 			dd_consume_n(dd, 2);
-			dd->type_info = 1;
-
-			p = strchr(T_type, c1);
-			idx = p - T_type;
-			/* special name prefix */
-			dd_append(dd, T_type_name[idx]);
-			dd_append(dd, "__");
-
 			return dd_type(dd);
 		}
 		if (c1 == 'h' || c1 == 'v') {
@@ -1222,7 +1153,6 @@ static int dd_special_name(struct demangle_data *dd)
 		if (c1 == 'V') {
 			/* guard */
 			dd_consume_n(dd, 2);
-			dd_append(dd, "guard_variable__");
 			return dd_name(dd);
 		}
 		if (c1 == 'R') {
@@ -1358,9 +1288,6 @@ static int dd_operator_name(struct demangle_data *dd)
 static int dd_source_name(struct demangle_data *dd)
 {
 	int num = dd_number(dd);
-	char *dollar;
-	char *p, *end;
-	unsigned i;
 
 	if (num < 0)
 		return -1;
@@ -1371,61 +1298,12 @@ static int dd_source_name(struct demangle_data *dd)
 	if (dd->type)
 		goto out;
 
-	/* ignore hash code in a rust symbol */
-	if (num == 17 && dd->old[dd->pos] == 'h') {
-		for (i = 1; i < 17; i++) {
-			if (!isxdigit(dd->old[dd->pos + i]))
-				break;
-		}
-
-		if (i == 17)
-			goto out;
-	}
-
 	if (dd->newpos)
 		dd_append(dd, "::");
+	dd_append_len(dd, &dd->old[dd->pos], num);
 
-	p = dd->old + dd->pos;
-	dollar = strchr(p, '$');
-	if (dollar == NULL)
-		goto out_append;
-
-	end = p + num;
-	if (dollar > end)
-		goto out_append;
-
-	while (dollar != NULL && dollar < end) {
-		bool found = false;
-
-		num = dollar - p;
-		dd_append_len(dd, p, num);
-
-		for (i = 0; i < ARRAY_SIZE(rust_mappings); i++) {
-			if (strncmp(rust_mappings[i].code, dollar+1,
-				    strlen(rust_mappings[i].code)))
-				continue;
-
-			dd_append(dd, rust_mappings[i].punc);
-			num += strlen(rust_mappings[i].code) + 2;
-			__dd_consume_n(dd, num, NULL);
-
-			p += num;
-			found = true;
-			break;
-		}
-
-		if (!found)
-			return -1;
-
-		dollar = strchr(p, '$');
-	}
-	num = end - p;
-
-out_append:
-	dd_append_len(dd, p, num);
 out:
-	__dd_consume_n(dd, num, NULL);
-	__dd_add_debug(dd, __func__);
+	dd_consume_n(dd, num);
 	return 0;
 }
 
@@ -1659,18 +1537,10 @@ static char *demangle_simple(char *str)
 	dd.pos = 2;
 	dd.new = xzalloc(0);
 
-	if (dd_encoding(&dd) < 0 || dd.level != 0) {
+	if (dd_encoding(&dd) < 0 || !dd_eof(&dd) || dd.level != 0) {
 		dd_debug_print(&dd);
 		free(dd.new);
 		return xstrdup(str);
-	}
-
-	if (!dd_eof(&dd)) {
-		if (!dd.type_info || dd_name(&dd) < 0) {
-			dd_debug_print(&dd);
-			free(dd.new);
-			return xstrdup(str);
-		}
 	}
 
 	if (has_prefix) {
@@ -1737,6 +1607,8 @@ TEST_CASE(demangle_simple1)
 {
 	char *name;
 
+	dbg_domain[DBG_DEMANGLE] = 2;
+
 	name = demangle_simple("normal");
 	TEST_STREQ("normal", name);
 	free(name);
@@ -1764,6 +1636,8 @@ TEST_CASE(demangle_simple2)
 {
 	char *name;
 
+	dbg_domain[DBG_DEMANGLE] = 2;
+
 	name = demangle_simple("_ZThn8_N13FtraceServiceD0Ev");
 	TEST_STREQ("FtraceService::~FtraceService", name);
 	free(name);
@@ -1785,6 +1659,8 @@ TEST_CASE(demangle_simple2)
 TEST_CASE(demangle_simple3)
 {
 	char *name;
+
+	dbg_domain[DBG_DEMANGLE] = 2;
 
 	name = demangle_simple("_ZN4node8Watchdog7DestroyEv.part.0");
 	TEST_STREQ("node::Watchdog::Destroy", name);
@@ -1823,6 +1699,8 @@ TEST_CASE(demangle_simple4)
 {
 	char *name;
 
+	dbg_domain[DBG_DEMANGLE] = 2;
+
 	name = demangle_simple("_ZSt9__find_ifISt14_List_iteratorISt10shared_ptr"
 			       "I16AppLaunchingItemEEZN13MemoryChecker8add_itemE"
 			       "S1_I13LaunchingItemEEUlS7_E_ET_S9_S9_T0_"
@@ -1855,6 +1733,8 @@ TEST_CASE(demangle_simple4)
 TEST_CASE(demangle_simple5)
 {
 	char *name;
+
+	dbg_domain[DBG_DEMANGLE] = 2;
 
 	name = demangle_simple("_ZN2v88internal13RememberedSetILNS0_"
 			       "16PointerDirectionE1EE7IterateIZNS3_"
@@ -1902,6 +1782,8 @@ TEST_CASE(demangle_simple6)
 {
 	char *name;
 
+	dbg_domain[DBG_DEMANGLE] = 2;
+
 	name = demangle_simple("_ZN4base8internal15OptionalStorageImLb1ELb1EE"
 			       "CI2NS0_19OptionalStorageBaseImLb1EEEIJRKmEEE"
 			       "NS_10in_place_tEDpOT_");
@@ -1920,57 +1802,4 @@ TEST_CASE(demangle_simple6)
 
 	return TEST_OK;
 }
-
-TEST_CASE(demangle_simple7)
-{
-	char *name;
-
-	name = demangle_simple("_ZTSSt12system_error");
-	TEST_STREQ("typeinfo__std::system_error", name);
-	free(name);
-
-	name = demangle_simple("_ZNSs4nposE");
-	TEST_STREQ("std::basic_string<>::npos", name);
-	free(name);
-
-	name = demangle_simple("_ZNSt14numeric_limitsIoE5radixE");
-	TEST_STREQ("std::numeric_limits::radix", name);
-	free(name);
-
-	name = demangle_simple("_ZGVNSt7__cxx117collateIcE2idE");
-	TEST_STREQ("guard_variable__std::__cxx11::collate::id", name);
-	free(name);
-
-	name = demangle_simple("_ZNSbIwSt11char_traitsIwESaIwEE4nposE");
-	TEST_STREQ("std::basic_string::npos", name);
-	free(name);
-
-	return TEST_OK;
-}
-
-TEST_CASE(demangle_rust1)
-{
-	char *name;
-
-	dbg_domain[DBG_DEMANGLE] = 2;
-
-	name = demangle_simple("_ZN8$BP$test3fooE");
-	TEST_STREQ("*test::foo", name);
-	free(name);
-
-	name = demangle_simple("_ZN35Bar$LT$$u5b$u32$u3b$$u20$4$u5d$$GT$E");
-	TEST_STREQ("Bar<[u32; 4]>", name);
-	free(name);
-
-	name = demangle_simple("_ZN71_$LT$Test$u20$$u2b$$u20$$u27$static$u20$as$u20$foo..Bar$LT$Test$GT$$GT$3barE");
-	TEST_STREQ("_<Test + 'static as foo..Bar<Test>>::bar", name);
-	free(name);
-
-	name = demangle_simple("_ZN3foo3bar17h05af221e174051e9E");
-	TEST_STREQ("foo::bar", name);
-	free(name);
-
-	return TEST_OK;
-}
-
 #endif /* UNIT_TEST */

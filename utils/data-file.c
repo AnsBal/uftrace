@@ -409,12 +409,13 @@ bool data_is_lp64(struct uftrace_data *handle)
 	return handle->hdr.class == ELFCLASS64;
 }
 
-int open_info_file(struct opts *opts, struct uftrace_data *handle)
+int open_data_file(struct opts *opts, struct uftrace_data *handle)
 {
+	int ret = -1;
 	FILE *fp;
 	char buf[PATH_MAX];
 	int saved_errno = 0;
-	struct stat stbuf;
+	bool lp64;
 
 	memset(handle, 0, sizeof(*handle));
 
@@ -425,9 +426,6 @@ int open_info_file(struct opts *opts, struct uftrace_data *handle)
 		goto ok;
 
 	saved_errno = errno;
-	/* provide a better error code for empty/invalid directories */
-	if (stat(opts->dirname, &stbuf) == 0)
-		saved_errno = EINVAL;
 
 	/* if default dirname is failed */
 	if (!strcmp(opts->dirname, UFTRACE_DIR_NAME)) {
@@ -454,8 +452,8 @@ int open_info_file(struct opts *opts, struct uftrace_data *handle)
 
 	/* data file loading is failed */
 	pr_dbg("cannot open %s file\n", buf);
+	goto out;
 
-	return -saved_errno;
 ok:
 	saved_errno = 0;
 	handle->fp = fp;
@@ -493,25 +491,6 @@ ok:
 		pr_err_ns("cannot read uftrace header info!\n");
 
 	fclose(fp);
-	return 0;
-}
-
-int open_data_file(struct opts *opts, struct uftrace_data *handle)
-{
-	int ret;
-	char buf[PATH_MAX];
-	int saved_errno = 0;
-
-	ret = open_info_file(opts, handle);
-	if (ret < 0) {
-		errno = -ret;
-		return -1;
-	}
-
-	if (handle->info.nr_tid == 0) {
-		errno = ENODATA;
-		return -1;
-	}
 
 	if (opts->exename == NULL)
 		opts->exename = handle->info.exename;
@@ -519,7 +498,6 @@ int open_data_file(struct opts *opts, struct uftrace_data *handle)
 	if (handle->hdr.feat_mask & TASK_SESSION) {
 		bool sym_rel = false;
 		struct uftrace_session_link *sessions = &handle->sessions;
-		int i;
 
 		if (handle->hdr.feat_mask & SYM_REL_ADDR)
 			sym_rel = true;
@@ -534,43 +512,23 @@ int open_data_file(struct opts *opts, struct uftrace_data *handle)
 
 			goto out;
 		}
+	}
 
-		if (sessions->first == NULL) {
-			saved_errno = EINVAL;
-			goto out;
-		}
-
-		for (i = 0; i < handle->info.nr_tid; i++) {
-			int tid = handle->info.tids[i];
-
-			if (find_task(sessions, tid))
-				break;
-		}
-
-		if (i == handle->info.nr_tid) {
-			saved_errno = ENODATA;
-			goto out;
-		}
+	if (handle->sessions.first == NULL) {
+		saved_errno = EINVAL;
+		goto out;
 	}
 
 	if (handle->hdr.info_mask & ARG_SPEC) {
-		struct uftrace_filter_setting setting = {
-			.ptype		= handle->info.patt_type,
-			.allow_kernel	= true,
-			.auto_args	= false,
-			.lp64		= data_is_lp64(handle),
-			.arch		= handle->arch,
-		};
-
 		if (handle->hdr.feat_mask & AUTO_ARGS) {
 			setup_auto_args_str(handle->info.autoarg,
 					    handle->info.autoret,
 					    handle->info.autoenum,
-					    &setting);
+					    lp64);
 		}
 
 		setup_fstack_args(handle->info.argspec, handle->info.retspec,
-				  handle, &setting);
+				  handle, false, handle->info.patt_type);
 
 		if (handle->info.auto_args_enabled) {
 			char *autoarg = handle->info.autoarg;
@@ -583,8 +541,8 @@ int open_data_file(struct opts *opts, struct uftrace_data *handle)
 					autoarg = autoret = "*";
 			}
 
-			setting.auto_args = true;
-			setup_fstack_args(autoarg, autoret, handle, &setting);
+			setup_fstack_args(autoarg, autoret, handle, true,
+					  handle->info.patt_type);
 		}
 	}
 
@@ -632,11 +590,8 @@ int open_data_file(struct opts *opts, struct uftrace_data *handle)
 	}
 
 out:
-	if (saved_errno) {
-		close_data_file(opts, handle);
+	if (saved_errno)
 		errno = saved_errno;
-		ret = -1;
-	}
 	else
 		ret = 0;
 

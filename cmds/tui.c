@@ -55,8 +55,8 @@ struct tui_window_ops {
 	void * (*sibling_next)(struct tui_window *win, void *node);
 	bool (*needs_blank)(struct tui_window *win, void *prev, void *next);
 	bool (*enter)(struct tui_window *win, void *node);
-	bool (*collapse)(struct tui_window *win, void *node, bool all, int depth);
-	bool (*expand)(struct tui_window *win, void *node, bool all, int depth);
+	bool (*collapse)(struct tui_window *win, void *node, int depth);
+	bool (*expand)(struct tui_window *win, void *node, int depth);
 	void (*header)(struct tui_window *win, struct uftrace_data *handle);
 	void (*footer)(struct tui_window *win, struct uftrace_data *handle);
 	void (*display)(struct tui_window *win, void *node);
@@ -141,8 +141,7 @@ static const char *help[] = {
 	"I             Show uftrace info",
 	"S             Change session",
 	"O             Open editor",
-	"c/e           Collapse/Expand direct children graph",
-	"C/E           Collapse/Expand all descendant graph",
+	"c/e           Collapse/Expand graph",
 	"n/p           Next/Prev sibling",
 	"u             Move up to parent",
 	"l             Move to the longest executed child",
@@ -898,14 +897,13 @@ static bool win_enter_graph(struct tui_window *win, void *node)
 	return true;
 }
 
-static int fold_graph_node(struct tui_graph_node *node, bool fold,
-			   bool all, int depth)
+static int fold_graph_node(struct tui_graph_node *node, bool fold, int depth)
 {
 	struct tui_graph_node *child;
 	int count = 0;
 	bool curr_fold = fold;
 
-	if (!all && depth < 0)
+	if (depth < 0)
 		return 0;
 	else if (depth > 0)
 		curr_fold = false;
@@ -920,21 +918,19 @@ static int fold_graph_node(struct tui_graph_node *node, bool fold,
 	}
 
 	list_for_each_entry(child, &node->n.head, n.list)
-		count += fold_graph_node(child, fold, all, depth - 1);
+		count += fold_graph_node(child, fold, depth - 1);
 
 	return count;
 }
 
-static bool win_collapse_graph(struct tui_window *win, void *node, bool all,
-			       int depth)
+static bool win_collapse_graph(struct tui_window *win, void *node, int depth)
 {
-	return fold_graph_node(node, true, all, depth);
+	return fold_graph_node(node, true, depth);
 }
 
-static bool win_expand_graph(struct tui_window *win, void *node, bool all,
-			     int depth)
+static bool win_expand_graph(struct tui_window *win, void *node, int depth)
 {
-	return fold_graph_node(node, false, all, depth);
+	return fold_graph_node(node, false, depth);
 }
 
 static void win_header_graph(struct tui_window *win,
@@ -1149,7 +1145,7 @@ static bool win_longest_child_graph(struct tui_window *win, void *node)
 	curr->folded = false;
 
 	list_for_each_entry(child, &curr->n.head, n.list) {
-		fold_graph_node(child, true, false, 0);
+		fold_graph_node(child, true, 0);
 		if (longest_child_time < child->n.time) {
 			longest_child_time = child->n.time;
 			longest_child = child;
@@ -1821,13 +1817,13 @@ static bool tui_window_move_prev(struct tui_window *win)
 	}
 
 	/* fold the current node before moving to the previous sibling */
-	count = win->ops->collapse(win, win->curr, false, 0);
+	count = win->ops->collapse(win, win->curr, 0);
 
 	while (win->curr != prev)
 		tui_window_move_up(win);
 
 	/* collapse the current node after moving to the previous sibling */
-	count += win->ops->collapse(win, win->curr, false, 1);
+	count += win->ops->collapse(win, win->curr, 1);
 
 	return count;
 }
@@ -1848,13 +1844,13 @@ static bool tui_window_move_next(struct tui_window *win)
 	}
 
 	/* fold the current node before moving to the next sibling */
-	count = win->ops->collapse(win, win->curr, false, 0);
+	count = win->ops->collapse(win, win->curr, 0);
 
 	while (win->curr != next)
 		tui_window_move_down(win);
 
 	/* collapse the current node after moving to the next sibling */
-	count += win->ops->collapse(win, win->curr, false, 1);
+	count += win->ops->collapse(win, win->curr, 1);
 
 	return count;
 }
@@ -2125,22 +2121,22 @@ static bool tui_window_enter(struct tui_window *win,
 	return win->ops->enter(win, win->curr);
 }
 
-static bool tui_window_collapse(struct tui_window *win, bool all)
+static bool tui_window_collapse(struct tui_window *win)
 {
 	if (win->ops->collapse == NULL)
 		return false;
 
 	/* fold all the directly children */
-	return win->ops->collapse(win, win->curr, all, 1);
+	return win->ops->collapse(win, win->curr, 1);
 }
 
-static bool tui_window_expand(struct tui_window *win, bool all)
+static bool tui_window_expand(struct tui_window *win)
 {
 	if (win->ops->expand == NULL)
 		return false;
 
 	/* unfold all the directly children */
-	return win->ops->expand(win, win->curr, all, 1);
+	return win->ops->expand(win, win->curr, 1);
 }
 
 static bool tui_window_move_parent(struct tui_window *win)
@@ -2153,7 +2149,7 @@ static bool tui_window_move_parent(struct tui_window *win)
 	while (win->curr != parent)
 		tui_window_move_up(win);
 
-	return tui_window_collapse(win, false);
+	return tui_window_collapse(win);
 }
 
 static bool tui_window_longest_child(struct tui_window *win)
@@ -2426,16 +2422,10 @@ static void tui_main_loop(struct opts *opts, struct uftrace_data *handle)
 			full_redraw = tui_window_open_editor(win);
 			break;
 		case 'c':
-			full_redraw = tui_window_collapse(win, false);
+			full_redraw = tui_window_collapse(win);
 			break;
 		case 'e':
-			full_redraw = tui_window_expand(win, false);
-			break;
-		case 'C':
-			full_redraw = tui_window_collapse(win, true);
-			break;
-		case 'E':
-			full_redraw = tui_window_expand(win, true);
+			full_redraw = tui_window_expand(win);
 			break;
 		case 'p':
 			full_redraw = tui_window_move_prev(win);

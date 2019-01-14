@@ -28,14 +28,11 @@
 
 enum symtype {
 	ST_UNKNOWN,
-	ST_LOCAL_FUNC	= 't',
-	ST_GLOBAL_FUNC	= 'T',
-	ST_WEAK_FUNC	= 'w',
-	ST_PLT_FUNC	= 'P',
-	ST_KERNEL_FUNC	= 'K',
-	ST_LOCAL_DATA	= 'd',
-	ST_GLOBAL_DATA	= 'D',
-	ST_WEAK_DATA	= 'v',
+	ST_LOCAL	= 't',
+	ST_GLOBAL	= 'T',
+	ST_WEAK		= 'w',
+	ST_PLT		= 'P',
+	ST_KERNEL	= 'K',
 };
 
 struct sym {

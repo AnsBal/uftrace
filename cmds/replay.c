@@ -644,7 +644,7 @@ void get_argspec_string(struct uftrace_task_reader *task,
 						 (uint64_t)val.i);
 
 			if (sym) {
-				print_args("%s", color_symbol);
+				print_args("%s", color_fptr);
 				print_args("&%s", sym->name);
 				print_args("%s", color_reset);
 			}
@@ -687,30 +687,18 @@ void get_argspec_string(struct uftrace_task_reader *task,
 			free(estr);
 		}
 		else {
-			struct uftrace_session_link *sessions = &task->h->sessions;
-			struct uftrace_session *s;
-			struct sym *sym;
+			assert(idx < ARRAY_SIZE(len_mod));
+			lm = len_mod[idx];
 
 			if (spec->fmt != ARG_FMT_AUTO)
 				memcpy(val.v, data, spec->size);
 
-			s = find_task_session(sessions, task->t,
-					      task->rstack->time);
+			snprintf(fmtstr, sizeof(fmtstr), "%%#%s%c", lm, fmt);
 
-			sym = find_symtabs(&s->symtabs, val.ll);
-
-			if (sym) {
-				print_args("%s", color_symbol);
-				print_args("&%s", sym->name);
-				print_args("%s", color_reset);
-			}
-			else {
-				assert(idx < ARRAY_SIZE(len_mod));
-				lm = len_mod[idx];
-
-				snprintf(fmtstr, sizeof(fmtstr), "%%#%s%c", lm, fmt);
+			if (spec->size > (int)sizeof(long))
 				print_args(fmtstr, val.ll);
-			}
+			else
+				print_args(fmtstr, val.i);
 		}
 
 		i++;
@@ -763,7 +751,7 @@ static int print_graph_rstack(struct uftrace_data *handle,
 	task->timestamp_last = task->timestamp;
 	task->timestamp = rstack->time;
 
-	if (opts->libname && sym && sym->type == ST_PLT_FUNC) {
+	if (opts->libname && sym && sym->type == ST_PLT) {
 		struct uftrace_session *s;
 
 		s = find_task_session(sessions, task->t, rstack->time);

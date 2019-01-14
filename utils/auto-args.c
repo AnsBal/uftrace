@@ -22,8 +22,7 @@ static struct rb_root auto_enum = RB_ROOT;
 extern void add_trigger(struct uftrace_filter *filter, struct uftrace_trigger *tr,
 			bool exact_match);
 extern int setup_trigger_action(char *str, struct uftrace_trigger *tr,
-				char **module, unsigned long orig_flags,
-				struct uftrace_filter_setting *setting);
+				char **module, unsigned long orig_flags);
 
 static void add_auto_args(struct rb_root *root, struct uftrace_filter *entry,
 			  struct uftrace_trigger *tr)
@@ -64,8 +63,7 @@ static void add_auto_args(struct rb_root *root, struct uftrace_filter *entry,
 }
 
 static void build_auto_args(const char *args_str, struct rb_root *root,
-			    unsigned long flag,
-			    struct uftrace_filter_setting *setting)
+			    unsigned long flag, bool is_lp64, bool ignore_type)
 {
 	struct strv specs = STRV_INIT;
 	char *name;
@@ -99,7 +97,7 @@ static void build_auto_args(const char *args_str, struct rb_root *root,
 		 */
 		entry.end = (unsigned long)xstrdup(p + 1);
 
-		if (setup_trigger_action(name, &tr, NULL, flag, setting) < 0)
+		if (setup_trigger_action(name, &tr, NULL, flag) < 0)
 			goto next;
 
 		/*
@@ -148,8 +146,8 @@ static struct uftrace_filter *dwarf_argspec_list;
 
 static struct uftrace_filter * find_dwarf_argspec(struct uftrace_filter *filter,
 						  struct debug_info *dinfo,
-						  bool is_retval,
-						  struct uftrace_filter_setting *setting)
+						  bool is_retval, bool is_lp64,
+						  bool ignore_type)
 {
 	LIST_HEAD(dwarf_argspec);
 	struct uftrace_filter *dwarf_filter;
@@ -168,7 +166,7 @@ static struct uftrace_filter * find_dwarf_argspec(struct uftrace_filter *filter,
 	if (arg_str == NULL)
 		return NULL;
 
-	setup_trigger_action(arg_str, &dwarf_tr, NULL, flag, setting);
+	setup_trigger_action(arg_str, &dwarf_tr, NULL, flag);
 	if (list_empty(dwarf_tr.pargs))
 		return NULL;
 
@@ -188,13 +186,13 @@ static struct uftrace_filter * find_dwarf_argspec(struct uftrace_filter *filter,
 
 struct uftrace_filter * find_auto_argspec(struct uftrace_filter *filter,
 					  struct uftrace_trigger *tr,
-					  struct debug_info *dinfo,
-					  struct uftrace_filter_setting *setting)
+					  struct debug_info *dinfo)
 {
 	struct uftrace_filter *auto_arg = NULL;
 
 	if (debug_info_has_argspec(dinfo))
-		auto_arg = find_dwarf_argspec(filter, dinfo, false, setting);
+		auto_arg = find_dwarf_argspec(filter, dinfo, false,
+					      tr->lp64, !tr->type);
 
 	if (auto_arg == NULL)
 		auto_arg = find_auto_args(&auto_argspec, filter->name);
@@ -204,13 +202,13 @@ struct uftrace_filter * find_auto_argspec(struct uftrace_filter *filter,
 
 struct uftrace_filter * find_auto_retspec(struct uftrace_filter *filter,
 					  struct uftrace_trigger *tr,
-					  struct debug_info *dinfo,
-					  struct uftrace_filter_setting *setting)
+					  struct debug_info *dinfo)
 {
 	struct uftrace_filter *auto_ret = NULL;
 
 	if (debug_info_has_argspec(dinfo))
-		auto_ret = find_dwarf_argspec(filter, dinfo, true, setting);
+		auto_ret = find_dwarf_argspec(filter, dinfo, true,
+					      tr->lp64, !tr->type);
 
 	if (auto_ret == NULL)
 		auto_ret = find_auto_args(&auto_retspec, filter->name);
@@ -228,22 +226,20 @@ char *get_auto_retspec_str(void)
 	return auto_retvals_list;
 }
 
-void setup_auto_args(struct uftrace_filter_setting *setting)
+void setup_auto_args(bool is_lp64)
 {
-
 	parse_enum_string(auto_enum_list, &auto_enum);
 	build_auto_args(auto_args_list, &auto_argspec, TRIGGER_FL_ARGUMENT,
-			setting);
+			is_lp64, false);
 	build_auto_args(auto_retvals_list, &auto_retspec, TRIGGER_FL_RETVAL,
-			setting);
+			is_lp64, false);
 }
 
-void setup_auto_args_str(char *args, char *rets, char *enums,
-			 struct uftrace_filter_setting *setting)
+void setup_auto_args_str(char *args, char *rets, char *enums, bool is_lp64)
 {
 	parse_enum_string(enums, &auto_enum);
-	build_auto_args(args, &auto_argspec, TRIGGER_FL_ARGUMENT, setting);
-	build_auto_args(rets, &auto_retspec, TRIGGER_FL_RETVAL, setting);
+	build_auto_args(args, &auto_argspec, TRIGGER_FL_ARGUMENT, is_lp64, true);
+	build_auto_args(rets, &auto_retspec, TRIGGER_FL_RETVAL, is_lp64, true);
 }
 
 static void release_auto_args(struct rb_root *root)
@@ -763,16 +759,13 @@ TEST_CASE(argspec_auto_args)
 	struct uftrace_filter *entry;
 	struct uftrace_filter key;
 	struct uftrace_arg_spec *spec;
-	struct uftrace_filter_setting setting = {
-		.lp64 = host_is_lp64(),
-	};
 	int idx = 1;
 
 	build_auto_args(test_auto_args, &auto_argspec, TRIGGER_FL_ARGUMENT,
-			&setting);
+			host_is_lp64(), false);
 
 	key.name = "foo";
-	entry = find_auto_argspec(&key, NULL, NULL, &setting);
+	entry = find_auto_argspec(&key, NULL, NULL);
 	TEST_NE(entry, NULL);
 	TEST_EQ(entry->trigger.flags, TRIGGER_FL_ARGUMENT);
 
@@ -783,7 +776,7 @@ TEST_CASE(argspec_auto_args)
 	}
 
 	key.name = "bar";
-	entry = find_auto_argspec(&key, NULL, NULL, &setting);
+	entry = find_auto_argspec(&key, NULL, NULL);
 	TEST_NE(entry, NULL);
 	TEST_EQ(entry->trigger.flags, TRIGGER_FL_ARGUMENT);
 
@@ -792,13 +785,13 @@ TEST_CASE(argspec_auto_args)
 	TEST_EQ(spec->idx, 1);
 
 	key.name = "xxx";
-	entry = find_auto_argspec(&key, NULL, NULL, &setting);
+	entry = find_auto_argspec(&key, NULL, NULL);
 	TEST_EQ(entry, NULL);
 
 	release_auto_args(&auto_argspec);
 
 	key.name = "foo";
-	entry = find_auto_argspec(&key, NULL, NULL, &setting);
+	entry = find_auto_argspec(&key, NULL, NULL);
 	TEST_EQ(entry, NULL);
 
 	return TEST_OK;
