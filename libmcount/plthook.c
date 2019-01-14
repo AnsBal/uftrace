@@ -89,12 +89,21 @@ ALIAS_DECL(__cyg_profile_func_exit);
 #define SKIP_SYM(func)  { #func, &uftrace_ ## func }
 
 const struct plthook_skip_symbol plt_skip_syms[] = {
+<<<<<<< HEAD
 	//SKIP_SYM(mcount),
 	//SKIP_SYM(_mcount),
 	//SKIP_SYM(__fentry__),
 	SKIP_SYM(__gnu_mcount_nc),
 	//SKIP_SYM(__cyg_profile_func_enter),
 	//SKIP_SYM(__cyg_profile_func_exit),
+=======
+	SKIP_SYM(mcount),
+	SKIP_SYM(_mcount),
+	SKIP_SYM(__fentry__),
+	SKIP_SYM(__gnu_mcount_nc),
+	SKIP_SYM(__cyg_profile_func_enter),
+	SKIP_SYM(__cyg_profile_func_exit),
+>>>>>>> upstream/master
 };
 size_t plt_skip_nr = ARRAY_SIZE(plt_skip_syms);
 
@@ -148,11 +157,19 @@ static void restore_plt_functions(struct plthook_data *pd)
 extern void __weak plt_hooker(void);
 extern unsigned long plthook_return(void);
 
+<<<<<<< HEAD
 __weak void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 						    const char *modname,
 						    unsigned long offset, 
 							struct list_head* plthook_modules)
 {
+=======
+__weak struct plthook_data *mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
+						    const char *modname,
+						    unsigned long offset)
+{
+	return NULL;
+>>>>>>> upstream/master
 }
 
 static int find_got(struct uftrace_elf_data *elf,
@@ -184,7 +201,15 @@ static int find_got(struct uftrace_elf_data *elf,
 	}
 
 	if (!plt_found) {
+<<<<<<< HEAD
 		mcount_arch_hook_no_plt(elf, modname, offset, &plthook_modules);
+=======
+		pd = mcount_arch_hook_no_plt(elf, modname, offset);
+		if (pd == NULL)
+			pr_dbg2("no PLTGOT found.. ignoring...\n");
+		else
+			list_add_tail(&pd->list, &plthook_modules);
+>>>>>>> upstream/master
 
 		return 0;
 	}

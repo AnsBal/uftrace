@@ -144,13 +144,21 @@ static void mcount_filter_init(enum uftrace_pattern_type ptype, char *dirname,
 	char *caller_str    = getenv("UFTRACE_CALLER");
 	bool lp64           = host_is_lp64();
 
+	struct uftrace_filter_setting filter_setting = {
+		.ptype		= ptype,
+		.auto_args	= false,
+		.allow_kernel	= false,
+		.lp64		= host_is_lp64(),
+		.arch		= host_cpu_arch(),
+	};
+
 	load_module_symtabs(&symtabs);
 
 	/* setup auto-args only if argument/return value is used */
 	if (argument_str || retval_str || autoargs_str ||
 	    (trigger_str && (strstr(trigger_str, "arg") ||
 			     strstr(trigger_str, "retval")))) {
-		setup_auto_args(lp64);
+		setup_auto_args(&filter_setting);
 	}
 
 	/* use debug info if available */
@@ -159,17 +167,17 @@ static void mcount_filter_init(enum uftrace_pattern_type ptype, char *dirname,
 	save_debug_info(&symtabs, dirname);
 
 	uftrace_setup_filter(filter_str, &symtabs, &mcount_triggers,
-			     &mcount_filter_mode, false, ptype);
+			     &mcount_filter_mode, &filter_setting);
 	uftrace_setup_trigger(trigger_str, &symtabs, &mcount_triggers,
-			      &mcount_filter_mode, false, ptype, lp64);
+			      &mcount_filter_mode, &filter_setting);
 	uftrace_setup_argument(argument_str, &symtabs, &mcount_triggers,
-			       false, ptype, lp64, false);
+			       &filter_setting);
 	uftrace_setup_retval(retval_str, &symtabs, &mcount_triggers,
-			     false, ptype, lp64, false);
+			     &filter_setting);
 
 	if (caller_str) {
 		uftrace_setup_caller_filter(caller_str, &symtabs,
-					    &mcount_triggers, ptype);
+					    &mcount_triggers, &filter_setting);
 
 		if (uftrace_count_filter(&mcount_triggers,
 					 TRIGGER_FL_CALLER) != 0)
@@ -187,10 +195,12 @@ static void mcount_filter_init(enum uftrace_pattern_type ptype, char *dirname,
 				autoarg = autoret = "*";
 		}
 
-		uftrace_setup_argument(autoarg, &symtabs, &mcount_triggers,
-				       true, ptype, lp64, false);
-		uftrace_setup_retval(autoret, &symtabs, &mcount_triggers,
-				     true, ptype, lp64, false);
+		filter_setting.auto_args = true;
+
+		uftrace_setup_argument(autoarg, &symtabs,
+				       &mcount_triggers, &filter_setting);
+		uftrace_setup_retval(autoret, &symtabs,
+				     &mcount_triggers, &filter_setting);
 	}
 
 	if (getenv("UFTRACE_DEPTH"))
@@ -1344,7 +1354,7 @@ static void mcount_script_init(enum uftrace_pattern_type patt_type)
 	strv_free(&info.cmds);
 }
 
-static void mcount_startup(void)
+static __used void mcount_startup(void)
 {
 	//char *pipefd_str;
 	char *logfd_str;
@@ -1507,6 +1517,10 @@ static void mcount_cleanup(void)
 		script_finish();
 
 	unload_symtabs(&symtabs);
+<<<<<<< HEAD
+=======
+
+>>>>>>> upstream/master
 	pr_dbg("exit from libmcount\n");
 }
 
@@ -1610,10 +1624,7 @@ TEST_CASE(mcount_thread_data)
 {
 	struct mcount_thread_data *mtdp;
 
-	if (0)
-		mcount_startup();
-	else
-		setup_mcount_test();
+	setup_mcount_test();
 
 	mtdp = get_thread_data();
 	TEST_EQ(check_thread_data(mtdp), true);

@@ -52,7 +52,7 @@ extern FILE *outfp;
 extern const char *color_reset;
 extern const char *color_bold;
 extern const char *color_string;
-extern const char *color_fptr;
+extern const char *color_symbol;
 extern const char *color_enum;
 extern const char *color_enum_or;
 
@@ -331,6 +331,5 @@ struct uftrace_data;
 
 char *get_event_name(struct uftrace_data *handle, unsigned evt_id);
 char *absolute_dirname(const char *path, char *resolved_path);
-const char * arch_register_dwarf_name(int dwarf_reg);
 
 #endif /* UFTRACE_UTILS_H */
