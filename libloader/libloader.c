@@ -363,7 +363,7 @@ void *request_handler_thread(void *arg)
 	char *libloader_sock_path;
 
 	mkdir(LIBLOADER_SOCKET_DIR, 0755);
-	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, /*getpid()*/1);
+	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, getpid());
 	libloader_sock = listen_socket(libloader_sock_path);
 	pr_dbg2("accepting socket : %s", libloader_sock_path);
 

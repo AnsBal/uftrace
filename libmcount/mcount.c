@@ -1394,7 +1394,7 @@ static void mcount_startup(void)
 	nest_libcall = !!getenv("UFTRACE_NEST_LIBCALL");
 	pattern_str = getenv("UFTRACE_PATTERN");
 	fasttp = !!getenv("UFTRACE_FASTTP");
-	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, /*getpid()*/1);
+	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, getpid());
 
 	page_size_in_kb = getpagesize() / KB;
 
@@ -1528,6 +1528,9 @@ void __visible_default stop_tracing(void)
 	mcount_finish();
 
 	mcount_cleanup_fasttp();
+
+	destroy_dynsym_indexes();
+
 
 	//mcount_cleanup();
 }

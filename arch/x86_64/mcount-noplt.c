@@ -75,7 +75,7 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 		goto out;
 	}
 
-	/* mcount must be hooked since lince libmcount is not preloaded */
+	/* mcount must be hooked since libmcount is not preloaded */
 	#define HOOK_FUNC(func)  { #func }
 		struct {
 			const char *name;

@@ -1910,7 +1910,7 @@ int do_main_loop(int ready, struct opts *opts, int pid, char *libmcountpath, int
 	int pfd;
 
 	mkdir(UFTRACE_PIPE_DIR, 0755);
-	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, /*opts->attach_pid*/1);
+	xasprintf(&uftrace_pipe_path, "%s/%i", UFTRACE_PIPE_DIR, opts->attach_pid);
 	mkfifo(uftrace_pipe_path, 0755);
 	pfd = open(uftrace_pipe_path, O_RDWR);
 
@@ -1990,7 +1990,7 @@ int command_record(int argc, char *argv[], struct opts *opts)
 	int ret = -1;
 	char *libloader_sock_path;
 
-	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, /*opts->attach_pid*/1) ;
+	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, opts->attach_pid) ;
 
 	if (!opts->nop && create_directory(opts->dirname) < 0)
 		return -1;
