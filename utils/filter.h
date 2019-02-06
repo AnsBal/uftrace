@@ -134,7 +134,7 @@ struct uftrace_filter_setting {
 	bool				allow_kernel;
 	bool				lp64;
 	/* caller-defined data */
-	void				*private;
+	void				*privateData;
 };
 
 /* please see man proc(5) for /proc/[pid]/statm */
