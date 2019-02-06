@@ -33,10 +33,26 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 	if (patch_funcs == NULL)
 		return 0;
 
+	#define FASTTP_SKIP_SYMBOL(func)  { #func }
+		struct {
+			const char *name;
+		} fasttp_skip_symbol[] = {
+			/* mcount functions */
+			FASTTP_SKIP_SYMBOL(_start),
+			FASTTP_SKIP_SYMBOL(__gmon_start__),
+			FASTTP_SKIP_SYMBOL(__static_initialization_and_destruction_0),
+			FASTTP_SKIP_SYMBOL(_GLOBAL__sub_I_myex),
+			FASTTP_SKIP_SYMBOL(__libc_csu_init),
+			FASTTP_SKIP_SYMBOL(__libc_csu_fini),
+			FASTTP_SKIP_SYMBOL(atexit),
+		};
+	#undef FASTTP_SKIP_SYMBOL
+	size_t fasttp_skip_nr = ARRAY_SIZE(fasttp_skip_symbol);
+
 	strv_split(&funcs, patch_funcs, ";");
 
 	strv_for_each(&funcs, name, j) {
-		unsigned i;
+		unsigned i, j;
 		struct sym *sym;
 		struct uftrace_pattern patt;
 
@@ -44,8 +60,17 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 
 		for (i = 0; i < symtab->nr_sym; i++) {
 			sym = &symtab->sym[i];
+			bool skip = false;
+			
+			for (j = 0; j < fasttp_skip_nr; j++) {
+				if (!strcmp(sym->name, fasttp_skip_symbol[j].name)) {
+					pr_dbg2("skipping fasttp tracepoint in symbol: %s \n", sym->name);
+					skip = true;
+					break;
+				}
+			}	
 
-			if (!match_filter_pattern(&patt, sym->name))
+			if (!match_filter_pattern(&patt, sym->name) || skip)
 				continue;
 
 			struct tracepoint_handler* tracepoint_h;

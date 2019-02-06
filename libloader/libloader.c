@@ -46,10 +46,7 @@ static void send_reply(int sock, unsigned short type)
 		return;
 
 	if (writev(sock, iov, 1) != len) {
-		/* TODO normal stop */
-		/*if (!mcount_should_stop())
-			pr_red("write tid info failed");*/
-		printf("send_reply couldnt write all bytes\n");
+		pr_dbg2("send_reply couldnt write all bytes\n");
 	}
 }
 
@@ -140,7 +137,6 @@ static void recv_stop_tracing_request(int sock, int len)
 
 static void recv_dlclose_request(int sock, int len)
 {
-	/* TODO clean multiple dlclose */
 	struct libloader_request_dlclose request_dlclose;
 	char* libname;
 	unsigned short reply_type = LIBLODAER_SUCESS;
@@ -172,26 +168,6 @@ static void recv_dlclose_request(int sock, int len)
 		pr_red("dlclose request failed");
 		reply_type = LIBLOADER_FAILURE;
 	} 
-	if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}
-	if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}
-	if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}
-		if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}		if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}		if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}		if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}		if (dlclose(handle)) {
-		pr_red("dlclose request failed");
-	}
 	
 	pr_dbg2("request DLCLOSE: %s: %p\n", libname, handle);
 	send_reply(sock, reply_type);

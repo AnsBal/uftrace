@@ -99,10 +99,7 @@ enum libloader_request_type send_start_tracing_request(int sock, const char* nam
 		return LIBLOADER_FAILURE;
 
 	if (writev(sock, iov, 3) != len) {
-		/* TODO normal stop */
-		/*if (!mcount_should_stop())
-			pr_err("write tid info failed");*/
-		printf("send_start_tracing_request couldnt write all bytes\n");
+		pr_dbg2("send_start_tracing_request couldnt write all bytes\n");
 	}
 
 	return recv_reply(sock);
@@ -129,7 +126,7 @@ enum libloader_request_type send_stop_tracing_request(int sock, const char* name
 		return LIBLOADER_FAILURE;
 
 	if (writev(sock, iov, 3) != len) {
-		printf("send_stop_tracing_request couldnt write all bytes\n");
+		pr_dbg2("send_stop_tracing_request couldnt write all bytes\n");
 	}
 
 	return recv_reply(sock);
@@ -161,7 +158,7 @@ enum libloader_request_type send_env_request(int sock, const char* name, const c
 		return LIBLOADER_FAILURE;
 
 	if (writev(sock, iov, 5) != len) {
-		printf("send_env_request couldnt write all bytes\n");
+		pr_dbg2("send_env_request couldnt write all bytes\n");
 	}
 
 	return recv_reply(sock);
@@ -189,7 +186,7 @@ enum libloader_request_type send_dlopen_request(int sock, const char* name, int 
 		return LIBLOADER_FAILURE;
 
 	if (writev(sock, iov, 3) != len) {
-		printf("send_dlopen_request couldnt write all bytes\n");
+		pr_dbg2("send_dlopen_request couldnt write all bytes\n");
 	}
 
 	return recv_reply(sock);
@@ -216,7 +213,7 @@ enum libloader_request_type send_dlclose_request(int sock, const char* name)
 		return LIBLOADER_FAILURE;
 
 	if (writev(sock, iov, 3) != len) {
-		printf("send_dlclose_request couldnt write all bytes\n");
+		pr_dbg2("send_dlclose_request couldnt write all bytes\n");
 	}
 
 	return recv_reply(sock);

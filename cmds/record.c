@@ -2008,6 +2008,7 @@ int command_record(int argc, char *argv[], struct opts *opts)
 
 	/* TODO inject libloader in target */
 	int loader_sock = connect_socket(libloader_sock_path);
+	pr_dbg("Connected to libloader socket successfully\n");
 
 	char *libmcountpath = get_libmcount_path(opts);
 	if (libmcountpath == NULL)

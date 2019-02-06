@@ -979,6 +979,8 @@ void load_module_symtabs(struct symtabs *symtabs)
 		"libmcount-fast.so",
 		"libmcount-single.so",
 		"libmcount-fast-single.so",
+		"libdyntrace-fasttp.so",
+		"libloader.so",
 	};
 	size_t k;
 	unsigned long flags = symtabs->flags;

@@ -115,6 +115,9 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 	}
 
 	pd->pltgot_ptr = trampoline;
+	pd->pltgot_length = tramp_len;
+	pd->plt_found = false;
+	
 	pd->resolved_addr = xcalloc(pd->dsymtab.nr_sym, sizeof(long));
 
 	/* add trampoline - save orig addr and replace GOT */
@@ -203,8 +206,48 @@ void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 	}
 
 	mprotect(trampoline, tramp_len, PROT_READ|PROT_EXEC);
+	
 	return;
 out:
 	pr_dbg2("no PLTGOT found.. ignoring...\n");
 	free(pd);
+}
+
+void mcount_arch_unhook_no_plt(struct plthook_data *pd)
+{
+	uint32_t i, j;
+
+	for (i = 0; i < pd->dsymtab.nr_sym; i++) {
+		Elf64_Rela *rela;
+		struct sym *sym;
+		bool skip = false;
+		unsigned long relro_start = 0;
+		unsigned long relro_size = 0;
+		unsigned long page_size;
+
+		sym = &pd->dsymtab.sym[i];
+
+		for (j = 0; j < plt_skip_nr; j++) {
+			if (!strcmp(sym->name, plt_skip_syms[j].name)) {
+				skip = true;
+				break;
+			}
+		}
+		if (skip)
+			continue;
+
+		rela = (void*)sym->addr;
+		
+		page_size = getpagesize();
+
+		relro_start = rela->r_offset + pd->base_addr;
+		relro_size  = sizeof(long);
+
+		relro_start &= ~(page_size - 1);
+		relro_size   = ALIGN(relro_size, page_size);
+
+		mprotect((void *)relro_start, relro_size, PROT_READ | PROT_WRITE);
+		__atomic_store((long*)(rela->r_offset + pd->base_addr), &pd->resolved_addr[i], __ATOMIC_SEQ_CST);
+		mprotect((void *)relro_start, relro_size, PROT_READ);
+	}
 }

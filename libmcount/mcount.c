@@ -92,6 +92,10 @@ static unsigned long __maybe_unused mcount_watchpoints;
 /* whether caller filter is activated */
 static bool __maybe_unused mcount_has_caller;
 
+static bool mcount_toggle_cleanup = true;
+
+static pthread_once_t key_once = PTHREAD_ONCE_INIT;
+
 #ifdef DISABLE_MCOUNT_FILTER
 
 static void mcount_filter_init(enum uftrace_pattern_type ptype, char *dirname,
@@ -319,9 +323,8 @@ unlock:
 }
 
 /* to be used by pthread_create_key() */
-static void mtd_dtor(void *arg)
+void mtd_dtor(void *arg)
 {
-	pr_blue("mtd_dtor\n");
 	struct mcount_thread_data *mtdp = arg;
 	struct uftrace_msg_task tmsg;
 
@@ -344,6 +347,9 @@ static void mtd_dtor(void *arg)
 	finish_mem_region(&mtdp->mem_regions);
 	shmem_finish(mtdp);
 
+	/* every thread needs to reset it's mtd */
+	memset(&mtd, 0, sizeof(mtd));
+
 	tmsg.pid = getpid(),
 	tmsg.tid = mcount_gettid(mtdp),
 	tmsg.time = mcount_gettime();
@@ -353,13 +359,16 @@ static void mtd_dtor(void *arg)
 
 bool mcount_guard_recursion(struct mcount_thread_data *mtdp)
 {
-	pr_blue("mcount_guard_recursion\n");
-
 	if (unlikely(mtdp->recursion_marker))
 		return false;
 
 	if (unlikely(mcount_should_stop())) {
-		pr_blue("mcount_guard_recursion mcount_should_stop\n");
+		mtd_dtor(mtdp);
+		return false;
+	}
+
+	if (unlikely(mcount_toggle_cleanup == mtdp->toggle_cleanup)) {
+		mtdp->toggle_cleanup = !mtdp->toggle_cleanup;
 		mtd_dtor(mtdp);
 		return false;
 	}
@@ -371,9 +380,6 @@ bool mcount_guard_recursion(struct mcount_thread_data *mtdp)
 void mcount_unguard_recursion(struct mcount_thread_data *mtdp)
 {
 	mtdp->recursion_marker = false;
-
-	if (mcount_should_stop())
-		mtd_dtor(mtdp);
 }
 
 static struct sigaction old_sigact[2];
@@ -467,19 +473,15 @@ static void mcount_init_file(void)
 	       SESSION_ID_LEN, mcount_session_name(), basename(mcount_exename));
 
 	sigemptyset(&sa.sa_mask);
-	sigaction(SIGABRT, &sa, &old_sigact[0]);
-	sigaction(SIGSEGV, &sa, &old_sigact[1]);
+	//sigaction(SIGABRT, &sa, &old_sigact[0]);
+	//sigaction(SIGSEGV, &sa, &old_sigact[1]);
 }
 
 struct mcount_thread_data * mcount_prepare(void)
 {
-	static pthread_once_t once_control = PTHREAD_ONCE_INIT;
+	//static pthread_once_t once_control = PTHREAD_ONCE_INIT;
 	struct mcount_thread_data *mtdp = &mtd;
 	struct uftrace_msg_task tmsg;
-
-	memset(&mtd, 0, sizeof(mtd));
-
-	pr_blue("mcount_prepare\n");
 
 	if (unlikely(mcount_should_stop()))
 		return NULL;
@@ -502,10 +504,8 @@ struct mcount_thread_data * mcount_prepare(void)
 	mcount_init_file();
 	//pthread_once(&once_control, mcount_init_file);
 	prepare_shmem_buffer(mtdp);
-	pr_blue("mtd_key %p\n", mtdp);
 
 	pthread_setspecific(mtd_key, mtdp);
-	pr_blue("mtd_key %p\n", mtdp);
 
 	/* time should be get after session message sent */
 	tmsg.pid = getpid(),
@@ -515,14 +515,12 @@ struct mcount_thread_data * mcount_prepare(void)
 	uftrace_send_message(UFTRACE_MSG_TASK_START, &tmsg, sizeof(tmsg));
 
 	update_kernel_tid(tmsg.tid);
-	pr_blue("mcount_prepare finished\n");
 
 	return mtdp;
 }
 
 static void mcount_finish(void)
 {
-	pr_blue("mcount_finish\n");
 	if (!mcount_should_stop())
 		mcount_trace_finish(false);
 
@@ -938,14 +936,11 @@ int mcount_entry(unsigned long *parent_loc, unsigned long child,
 	struct mcount_thread_data *mtdp;
 	struct mcount_ret_stack *rstack;
 	struct uftrace_trigger tr;
-
-	//pr_blue("mcount_entry\n");
-
 	/* Access the mtd through TSD pointer to reduce TLS overhead */
 	mtdp = get_thread_data();
 	if (unlikely(check_thread_data(mtdp))) {
 		mtdp = mcount_prepare();
-		if (mtdp == NULL)
+		if (mtdp == NULL)	
 			return -1;
 	}
 	else {
@@ -999,6 +994,7 @@ int mcount_entry(unsigned long *parent_loc, unsigned long child,
 
 	mcount_entry_filter_record(mtdp, rstack, &tr, regs);
 	mcount_unguard_recursion(mtdp);
+
 	return 0;
 }
 
@@ -1007,8 +1003,6 @@ unsigned long mcount_exit(long *retval)
 	struct mcount_thread_data *mtdp;
 	struct mcount_ret_stack *rstack;
 	unsigned long retaddr;
-
-	pr_blue("mcount_exit\n");
 
 	mtdp = get_thread_data();
 	assert(mtdp != NULL);
@@ -1032,9 +1026,6 @@ unsigned long mcount_exit(long *retval)
 		mcount_auto_reset(mtdp);
 
 	mcount_unguard_recursion(mtdp);
-
-	if (unlikely(mcount_should_stop()))
-		retaddr = 0;
 
 	compiler_barrier();
 
@@ -1365,12 +1356,6 @@ static void mcount_startup(void)
 	enum uftrace_pattern_type patt_type = PATT_REGEX;
 	char *uftrace_pipe_path;
 
-	/* FIXME what if a thread found that this is set and 
-		does mtd_dtor then mcount_trace_finish ?
-	*/
-	//if (!(mcount_global_flags & MCOUNT_GFL_SETUP))
-	//	return;
-
 	mtd.recursion_marker = true;
 
 	outfp = stdout;
@@ -1379,7 +1364,6 @@ static void mcount_startup(void)
 	if (pthread_key_create(&mtd_key, mtd_dtor))
 		pr_err("cannot create mtd key");
 
-	//pipefd_str = getenv("UFTRACE_PIPE");
 	logfd_str = getenv("UFTRACE_LOGFD");
 	debug_str = getenv("UFTRACE_DEBUG");
 	bufsize_str = getenv("UFTRACE_BUFFER");
@@ -1525,14 +1509,19 @@ void __visible_default start_tracing(void)
 
 void __visible_default stop_tracing(void)
 {
+	mcount_toggle_cleanup = !mcount_toggle_cleanup;
 	mcount_finish();
-
+	destroy_dynsym_indexes();
 	mcount_cleanup_fasttp();
 
-	destroy_dynsym_indexes();
+	mcount_filter_finish();
 
+	if (SCRIPT_ENABLED && script_str)
+		script_finish();
 
-	//mcount_cleanup();
+	unload_symtabs(&symtabs);
+	memset(&symtabs, 0, sizeof(symtabs));
+	symtabs.flags = SYMTAB_FL_DEMANGLE | SYMTAB_FL_ADJ_OFFSET;
 }
 
 void __visible_default __monstartup(unsigned long low, unsigned long high)
