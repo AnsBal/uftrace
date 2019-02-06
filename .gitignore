@@ -11,6 +11,7 @@ ftrace.data.old
 uftrace.data
 uftrace.data.old
 !gdb/uftrace/*.py
+libloader.so
 libmcount.so
 libmcount-*.so
 libcygprof.so
