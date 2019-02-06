@@ -1679,7 +1679,6 @@ out:
 static void start_tracing(struct writer_data *wd, struct opts *opts, int ready_fd)
 {
 	int i, k;
-	uint64_t go = 1;
 
 	clock_gettime(CLOCK_MONOTONIC, &wd->ts1);
 

@@ -896,9 +896,6 @@ again:
 
 	mcount_unguard_recursion(mtdp);
 
-	/*if (unlikely(mcount_should_stop()))
-		ret_addr = 0;*/
-
 	compiler_barrier();
 
 	mtdp->idx--;

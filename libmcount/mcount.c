@@ -94,8 +94,6 @@ static bool __maybe_unused mcount_has_caller;
 
 static bool mcount_toggle_cleanup = true;
 
-static pthread_once_t key_once = PTHREAD_ONCE_INIT;
-
 #ifdef DISABLE_MCOUNT_FILTER
 
 static void mcount_filter_init(enum uftrace_pattern_type ptype, char *dirname,
@@ -482,8 +480,8 @@ static void mcount_init_file(void)
 	       SESSION_ID_LEN, mcount_session_name(), basename(mcount_exename));
 
 	sigemptyset(&sa.sa_mask);
-	//sigaction(SIGABRT, &sa, &old_sigact[0]);
-	//sigaction(SIGSEGV, &sa, &old_sigact[1]);
+	sigaction(SIGABRT, &sa, &old_sigact[0]);
+	sigaction(SIGSEGV, &sa, &old_sigact[1]);
 }
 
 struct mcount_thread_data * mcount_prepare(void)
