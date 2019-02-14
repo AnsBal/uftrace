@@ -1137,6 +1137,14 @@ static void cygprof_exit(unsigned long parent, unsigned long child)
 	 */
 	if (mtdp->idx > mcount_rstack_max)
 		goto out;
+	else if(mtdp->idx <= 0) {
+		/* 
+		 * cygprof_exit() could be called before cygprof_entry(). 
+		 * in this case, we should not record. 
+		 */ 
+		mcount_unguard_recursion(mtdp);
+		return;
+	}
 
 	rstack = &mtdp->rstack[mtdp->idx - 1];
 
