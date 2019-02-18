@@ -1,6 +1,7 @@
 #include "fasttp_wrapper.h"
 #include "./../libfasttp/include/dyntrace/fasttp/common.hpp"
 #include "./../libfasttp/include/dyntrace/fasttp/fasttp.hpp"
+#include "./../libfasttp/include/dyntrace/fasttp/error.hpp"
 
 
 #define new extern_new
@@ -24,17 +25,24 @@ extern "C" {
     fasttp::options ops{};
     
     fasttp::tracepoint* new_tracepoint(void* address) {
+         try {
+            ops.x86.disable_thread_safe = false;
+            auto enter_handler = [](const void *caller, const arch::regs& r, const void *return_address)
+            {
+                fasttp_entry((unsigned long)const_cast<void*>(return_address),(unsigned long)const_cast<void*>(caller));            
+            };
+            auto exit_handler = [](const void* caller, const arch::regs& r, const void *return_address)
+            {
+                fasttp_exit((unsigned long)const_cast<void*>(return_address),(unsigned long)const_cast<void*>(caller));            
+            };
+            return new fasttp::tracepoint{address, fasttp::entry_exit_handler{enter_handler, exit_handler}, ops};
+       
+        } catch(const dyntrace::fasttp::fasttp_error& e) {
+            return NULL;
+        } catch(const std::exception& e) {
+            return NULL;
+        }
         
-        ops.x86.disable_thread_safe = false;
-        auto enter_handler = [](const void *caller, const arch::regs& r, const void *return_address)
-        {
-            fasttp_entry((unsigned long)const_cast<void*>(return_address),(unsigned long)const_cast<void*>(caller));            
-        };
-        auto exit_handler = [](const void* caller, const arch::regs& r, const void *return_address)
-        {
-            fasttp_exit((unsigned long)const_cast<void*>(return_address),(unsigned long)const_cast<void*>(caller));            
-        };
-        return new fasttp::tracepoint{address, fasttp::entry_exit_handler{enter_handler, exit_handler}, ops};
     }
 
     void* delete_tracepoint(fasttp::tracepoint* tp){

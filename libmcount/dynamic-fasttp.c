@@ -64,7 +64,6 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 			
 			for (j = 0; j < fasttp_skip_nr; j++) {
 				if (!strcmp(sym->name, fasttp_skip_symbol[j].name)) {
-					pr_dbg2("skipping fasttp tracepoint in symbol: %s \n", sym->name);
 					skip = true;
 					break;
 				}
@@ -72,17 +71,26 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 
 			if (!match_filter_pattern(&patt, sym->name) || skip)
 				continue;
+			if(sym->type != ST_LOCAL_FUNC && sym->type != ST_GLOBAL_FUNC && sym->type != ST_WEAK_FUNC) {
+				continue;
+			}
 
+			tracepoint* tp = new_tracepoint((void*) sym->addr);
+
+			if(!tp){
+				pr_dbg2("failed to insert fasttp tracepoint in symbol: %s \n", sym->name);
+				continue;
+			}
+			
 			struct tracepoint_handler* tracepoint_h;
-
 			tracepoint_h = xmalloc(sizeof(*tracepoint_h) + strlen(sym->name) + 1);
-			tracepoint_h->tp = new_tracepoint((void*) sym->addr);
+			tracepoint_h->tp = tp;
 			strcpy(tracepoint_h->name, sym->name);
 			
 			INIT_LIST_HEAD(&tracepoint_h->list);
 			list_add(&tracepoint_h->list, &tracepoint_list);
 
-			pr_dbg2("inserted fasttp tracepoint in symbol: %s \n", tracepoint_h->name);
+			pr_dbg2("successfully inserted fasttp tracepoint in symbol: %s \n", tracepoint_h->name);
 		}
 
 		free_filter_pattern(&patt);
