@@ -1989,6 +1989,10 @@ int command_record(int argc, char *argv[], struct opts *opts)
 	int ret = -1;
 	char *libloader_sock_path;
 
+	if (opts->attach_pid <= 0) {
+		pr_err_ns("you must provide a valid pid using the --pid option\n");
+	}
+
 	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, opts->attach_pid) ;
 
 	if (!opts->nop && create_directory(opts->dirname) < 0)

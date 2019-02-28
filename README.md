@@ -38,6 +38,10 @@ privilege, it can also trace kernel functions as well( with `-k` option)
 if the system enables the function graph tracer in the kernel
 (`CONFIG_FUNCTION_GRAPH_TRACER=y`).
 
+__Fork Features__
+
+You can attach to a running proccess using `-p` option. You still need to provide the path to the executable for the debugging symbols. 
+It supports dynamic tracing with the [fast-tp library](https://github.com/AnsBal/fasttp-library)
 
 How to use uftrace
 ==================
@@ -225,9 +229,27 @@ The `tui` command is for interactive text-based user interface using ncurses.
 It provides basic functionality of `graph`, `report` and `info` commands as of
 now.
 
+__How to use fork features__
+
+The `record` command requires you to provide a valid pid of the process to 
+which you want to attach(using `-p` option). 
+
+Uftrace support dynamic tracing by compling the target with the -mnop-mcount option.
+This option adds NOPs instructions at the very beginning of a function. The NOPs are 
+later patched to insert a trampoline.
+An alternative to that is fastp-tp library. It does not need any compliation flag. It adds 
+the tracepoint dynamicly during the execution time (see [fast-tp library](https://github.com/AnsBal/fasttp-library) for more details).
+To use fast-tp library, use the `--fast-tp` option combined with `--patch=FUNC`. Where `FUNC` 
+is the name of the function you want to trace. To instrument all the symbols in the 
+executable, use `--patch=.`.
+
 
 How to install uftrace
 ======================
+
+__Fork dependencies__
+
+To install and use this uftrace fork, you need to install [fast-tp library](https://github.com/AnsBal/fasttp-library).
 
 The uftrace is written in C and tried to minimize external dependencies.
 Currently it does not require any of them but there're some optional
