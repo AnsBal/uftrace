@@ -33,7 +33,8 @@ related the execution environment.
 You can setup filters to exclude or include specific functions when tracing.
 In addition, it can save and show function arguments and return value.
 
-It supports multi-process and/or multi-threaded applications.  With root
+It supports multi
+rocess and/or multi-threaded applications.  With root
 privilege, it can also trace kernel functions as well( with `-k` option)
 if the system enables the function graph tracer in the kernel
 (`CONFIG_FUNCTION_GRAPH_TRACER=y`).
@@ -231,6 +232,9 @@ now.
 
 __How to use fork features__
 
+The target proccess needs to load the libloader/libloader.so library. It could
+either be injected at runtime or preloaded using LD_PRELOAD.
+
 The `record` command requires you to provide a valid pid of the process to 
 which you want to attach(using `-p` option). 
 
@@ -242,6 +246,16 @@ the tracepoint dynamicly during the execution time (see [fast-tp library](https:
 To use fast-tp library, use the `--fast-tp` option combined with `--patch=FUNC`. Where `FUNC` 
 is the name of the function you want to trace. To instrument all the symbols in the 
 executable, use `--patch=.`.
+
+Example of uftrace usage with fast-tp library:
+
+    $ uftrace record -p 23109 --fast-tp -P func ./example
+    $ uftrace replay
+
+Example of uftrace usage with -pg or -finstrument-functions:
+
+    $ uftrace record -p 23109 ./exec
+    $ uftrace replay
 
 
 How to install uftrace
