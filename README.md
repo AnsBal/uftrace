@@ -249,12 +249,12 @@ executable, use `--patch=.`.
 
 Example of uftrace usage with fast-tp library:
 
-    $ uftrace record -p 23109 --fast-tp -P func ./example
+    $ uftrace record -p 23109 --fast-tp -P a -P b -P c tests/t-abc
     $ uftrace replay
 
 Example of uftrace usage with -pg or -finstrument-functions:
 
-    $ uftrace record -p 23109 ./exec
+    $ uftrace record -p 23109 tests/t-abc
     $ uftrace replay
 
 
