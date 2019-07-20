@@ -11,7 +11,7 @@ namespace dyntrace::fasttp
 
         tracepoint* new_tracepoint(void* address);
 
-        void* delete_tracepoint(tracepoint* tp);
+        void delete_tracepoint(tracepoint* tp);
 
         void tracepoint_disable(tracepoint* tp);
 

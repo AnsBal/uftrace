@@ -460,9 +460,12 @@ int load_elf_dynsymtab(struct symtab *dsymtab, struct uftrace_elf_data *elf,
 	int rel_type = SHT_NULL;
 	bool found_dynamic = false;
 	bool found_dynsym = false;
+	bool found_rela_plt = false;
+	bool found_rela_dyn = false;
 	struct uftrace_elf_iter sec_iter;
 	struct uftrace_elf_iter dyn_iter;
 	struct uftrace_elf_iter rel_iter;
+	struct uftrace_elf_iter rel_dyn_iter;
 	unsigned symidx;
 	struct sym *sym;
 
@@ -478,7 +481,7 @@ int load_elf_dynsymtab(struct symtab *dsymtab, struct uftrace_elf_data *elf,
 	elf_for_each_shdr(elf, &sec_iter) {
 		typeof(sec_iter.shdr) *shdr = &sec_iter.shdr;
 		shstr = elf_get_name(elf, &sec_iter, shdr->sh_name);
-
+	
 		if (strcmp(shstr, ".dynsym") == 0) {
 			memcpy(&dyn_iter, &sec_iter, sizeof(sec_iter));
 			elf_get_strtab(elf, &dyn_iter, shdr->sh_link);
@@ -488,6 +491,12 @@ int load_elf_dynsymtab(struct symtab *dsymtab, struct uftrace_elf_data *elf,
 		else if (strcmp(shstr, ".rela.plt") == 0) {
 			memcpy(&rel_iter, &sec_iter, sizeof(sec_iter));
 			rel_type = SHT_RELA;
+			found_rela_plt = true;
+		}
+		else if (strcmp(shstr, ".rela.dyn") == 0) {
+			memcpy(&rel_dyn_iter, &sec_iter, sizeof(sec_iter));
+			rel_type = SHT_RELA;
+			found_rela_dyn = true;
 		}
 		else if (strcmp(shstr, ".rel.plt") == 0) {
 			memcpy(&rel_iter, &sec_iter, sizeof(sec_iter));
@@ -508,7 +517,7 @@ int load_elf_dynsymtab(struct symtab *dsymtab, struct uftrace_elf_data *elf,
 		goto out;
 	}
 
-	if (rel_type == SHT_NULL) {
+	if (rel_type == SHT_NULL || ((flags & SYMTAB_FL_RELA_DYNAMIC) && found_rela_dyn)) {
 		arch_load_dynsymtab_noplt(dsymtab, elf, offset, flags);
 		goto out_sort;
 	}
@@ -535,27 +544,26 @@ int load_elf_dynsymtab(struct symtab *dsymtab, struct uftrace_elf_data *elf,
 			elf_get_symbol(elf, &dyn_iter, symidx);
 
 			if (load_dyn_symbol(dsymtab, symidx, offset, flags,
-					    plt_entsize, prev_addr,
-					    elf, &dyn_iter)) {
+						plt_entsize, prev_addr,
+						elf, &dyn_iter)) {
 				sym = &dsymtab->sym[dsymtab->nr_sym - 1];
 				prev_addr = sym->addr;
 			}
 		}
 	}
-	else {
+	else if(found_rela_plt)
 		elf_for_each_rela(elf, &rel_iter) {
 			symidx = elf_rel_symbol(&rel_iter.rela);
 			elf_get_symbol(elf, &dyn_iter, symidx);
-
+		
 			if (load_dyn_symbol(dsymtab, symidx, offset, flags,
-					    plt_entsize, prev_addr,
-					    elf, &dyn_iter)) {
+						plt_entsize, prev_addr,
+						elf, &dyn_iter)) {
 				sym = &dsymtab->sym[dsymtab->nr_sym - 1];
 				prev_addr = sym->addr;
 			}
 		}
-	}
-
+	
 out_sort:
 	pr_dbg2("loaded %zd symbols\n", dsymtab->nr_sym);
 

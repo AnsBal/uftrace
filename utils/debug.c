@@ -63,8 +63,8 @@ static void color(const char *code, FILE *fp)
 	    (fp == outfp && out_color == COLOR_OFF))
 		return;
 
-	if (fwrite(code, 1, len, fp) == len)
-		return;  /* ok */
+	//if (fwrite(code, 1, len, fp) == len)
+	//	return;  /* ok */
 
 	/* disable color */
 	log_color = COLOR_OFF;

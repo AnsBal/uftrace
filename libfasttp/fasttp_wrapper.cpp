@@ -45,7 +45,7 @@ extern "C" {
         
     }
 
-    void* delete_tracepoint(fasttp::tracepoint* tp){
+    void delete_tracepoint(fasttp::tracepoint* tp){
         delete tp;
     }
 

@@ -76,6 +76,35 @@ static void resolve_pltgot(struct plthook_data *pd, int idx)
 	}
 }
 
+/* mcount must be hooked since libmcount is not preloaded */
+#define HOOK_FUNC(func)  { #func }
+	struct plthook_hook_symbol mcount_hook_list[] = {
+		/* mcount functions */
+		HOOK_FUNC(mcount),
+		HOOK_FUNC(_mcount),
+		HOOK_FUNC(__fentry__),
+		HOOK_FUNC(__gnu_mcount_nc),
+		HOOK_FUNC(__cyg_profile_func_enter),
+		HOOK_FUNC(__cyg_profile_func_exit),
+		/* wrap functions */
+		HOOK_FUNC(backtrace),
+		HOOK_FUNC(__cxa_throw),
+		HOOK_FUNC(__cxa_rethrow),
+		HOOK_FUNC(dlop__cxa_begin_catchen),
+		HOOK_FUNC(__cxa_end_catch),
+		HOOK_FUNC(dlopen),
+		HOOK_FUNC(pthread_exit),
+		HOOK_FUNC(_Unwind_Resume),
+		HOOK_FUNC(posix_spawn),
+		HOOK_FUNC(posix_spawnp),
+		HOOK_FUNC(execve),
+		HOOK_FUNC(execvpe),
+		HOOK_FUNC(fexecve),
+	};
+#undef HOOK_FUNC
+size_t mcount_hook_nr = ARRAY_SIZE(mcount_hook_list);
+
+
 /* use weak reference for non-defined (arch-dependent) symbols */
 #define ALIAS_DECL(_sym)  extern __weak void (*uftrace_##_sym)(void);
 
@@ -85,14 +114,17 @@ ALIAS_DECL(__fentry__);
 ALIAS_DECL(__gnu_mcount_nc);
 ALIAS_DECL(__cyg_profile_func_enter);
 ALIAS_DECL(__cyg_profile_func_exit);
+ALIAS_DECL(skip_sym);
+
 
 #define SKIP_SYM(func)  { #func, &uftrace_ ## func }
 
 const struct plthook_skip_symbol plt_skip_syms[] = {
+	SKIP_SYM(skip_sym),
 	//SKIP_SYM(mcount),
 	//SKIP_SYM(_mcount),
 	//SKIP_SYM(__fentry__),
-	SKIP_SYM(__gnu_mcount_nc),
+	//SKIP_SYM(__gnu_mcount_nc),
 	//SKIP_SYM(__cyg_profile_func_enter),
 	//SKIP_SYM(__cyg_profile_func_exit),
 };
@@ -115,7 +147,7 @@ static void restore_plt_functions(struct plthook_data *pd)
 		unsigned long plthook_addr;
 		unsigned long resolved_addr;
 		struct sym *sym = dsymtab->sym_names[i];
-
+		
 		for (k = 0; k < plt_skip_nr; k++) {
 			const struct plthook_skip_symbol *skip_sym;
 
@@ -131,7 +163,7 @@ static void restore_plt_functions(struct plthook_data *pd)
 			break;
 		}
 		if (skipped)
-			continue;
+			continue;	
 
 		resolved_addr = pd->pltgot_ptr[3 + i];
 		plthook_addr = mcount_arch_plthook_addr(pd, i);
@@ -139,6 +171,7 @@ static void restore_plt_functions(struct plthook_data *pd)
 			/* save already resolved address and hook it */
 			pd->resolved_addr[i] = resolved_addr;
 			overwrite_pltgot(pd, 3 + i, (void *)plthook_addr);
+
 			pr_dbg2("restore [%u] %s: %p (PLT: %#lx)\n",
 				i, sym->name, resolved_addr, plthook_addr);
 		}
@@ -151,7 +184,8 @@ extern unsigned long plthook_return(void);
 __weak void mcount_arch_hook_no_plt(struct uftrace_elf_data *elf,
 						    const char *modname,
 						    unsigned long offset, 
-							struct list_head* plthook_modules)
+							struct list_head* plthook_modules, 
+							unsigned long flags)
 {
 }
 
@@ -167,6 +201,7 @@ static int find_got(struct uftrace_elf_data *elf,
 	bool plt_found = false;
 	unsigned long pltgot_addr = 0;
 	unsigned long plt_addr = 0;
+	unsigned long got_addr = 0;
 	struct plthook_data *pd;
 
 	elf_for_each_shdr(elf, iter) {
@@ -187,10 +222,20 @@ static int find_got(struct uftrace_elf_data *elf,
 		}
 	}
 
-	if (!plt_found) {
-		mcount_arch_hook_no_plt(elf, modname, offset, &plthook_modules);
+	elf_for_each_shdr(elf, iter) {
+		char *shstr = elf_get_name(elf, iter, iter->shdr.sh_name);
 
+		if (strcmp(shstr, ".got") == 0) {
+			got_addr = iter->shdr.sh_addr + offset;
+			break;
+		}
+	}
+
+	if (!plt_found) {
+		mcount_arch_hook_no_plt(elf, modname, offset, &plthook_modules, 0);
 		return 0;
+	} else if (got_addr) {
+		mcount_arch_hook_no_plt(elf, modname, offset, &plthook_modules, SYMTAB_FL_RELA_DYNAMIC);
 	}
 
 	elf_for_each_shdr(elf, iter) {
@@ -201,6 +246,7 @@ static int find_got(struct uftrace_elf_data *elf,
 			break;
 		}
 	}
+
 
 	if (plt_addr == 0) {
 		pr_dbg("cannot find PLT address\n");

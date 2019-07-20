@@ -274,6 +274,11 @@ struct plthook_skip_symbol {
 	void       *addr;
 };
 
+struct plthook_hook_symbol {
+	const char *name;
+	void       *addr;
+};
+
 struct plthook_data {
 	struct list_head		list;
 	const char			*mod_name;
@@ -301,6 +306,8 @@ extern unsigned long mcount_arch_plthook_addr(struct plthook_data *pd, int idx);
 extern unsigned long plthook_resolver_addr;
 extern const struct plthook_skip_symbol plt_skip_syms[];
 extern size_t plt_skip_nr;
+extern struct plthook_hook_symbol mcount_hook_list[];
+extern size_t mcount_hook_nr;
 
 struct uftrace_trigger;
 struct uftrace_arg_spec;
