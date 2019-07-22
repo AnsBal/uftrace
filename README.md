@@ -236,7 +236,8 @@ The target proccess needs to load the libloader/libloader.so library. It could
 either be injected at runtime or preloaded using LD_PRELOAD.
 
 The `record` command requires you to provide a valid pid of the process to 
-which you want to attach(using `-p` option). 
+which you want to attach(using `-p` option). Only the `record` command has been 
+patched in this fork. Other commands like `live` and `recv` may not work properly.
 
 Uftrace support dynamic tracing by compling the target with the -mnop-mcount option.
 This option adds NOPs instructions at the very beginning of a function. The NOPs are 
@@ -247,15 +248,18 @@ To use fast-tp library, use the `--fast-tp` option combined with `--patch=FUNC`.
 is the name of the function you want to trace. To instrument all the symbols in the 
 executable, use `--patch=.`.
 
+Unless uftrace and the target executable are in the same folder, the `-d` option 
+should be used to indicate where the traces will be saved.
+
 Example of uftrace usage with fast-tp library:
 
-    $ uftrace record -p 23109 --fast-tp -P a -P b -P c tests/t-abc
-    $ uftrace replay
+    $ uftrace record -p 23109 -d /tmp/uftrace.data --fast-tp -P a -P b -P c tests/t-abc
+    $ uftrace replay -d /tmp/uftrace.data
 
 Example of uftrace usage with -pg or -finstrument-functions:
 
-    $ uftrace record -p 23109 tests/t-abc
-    $ uftrace replay
+    $ uftrace record -p 23109 -d /tmp/uftrace.data tests/t-abc
+    $ uftrace replay -d /tmp/uftrace.data
 
 
 How to install uftrace
