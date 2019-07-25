@@ -1988,12 +1988,22 @@ int command_record(int argc, char *argv[], struct opts *opts)
 	int efd;
 	int ret = -1;
 	char *libloader_sock_path;
+	bool free_dirname = false;
 
 	if (opts->attach_pid <= 0) {
 		pr_err_ns("you must provide a valid pid using the --pid option\n");
 	}
 
 	xasprintf(&libloader_sock_path, "%s/%i", LIBLOADER_SOCKET_DIR, opts->attach_pid) ;
+
+	if (!strcmp(opts->dirname, UFTRACE_DIR_NAME)) {
+		char cwd[PATH_MAX];
+		if (getcwd(cwd, sizeof(cwd)) == NULL) {
+			pr_err_ns("getcwd error");
+		}
+		xasprintf(&opts->dirname, "%s/%s", cwd, UFTRACE_DIR_NAME);
+		free_dirname = true;
+	}
 
 	if (!opts->nop && create_directory(opts->dirname) < 0)
 		return -1;
@@ -2022,6 +2032,7 @@ int command_record(int argc, char *argv[], struct opts *opts)
 
 	put_libmcount_path(libmcountpath);
 	free(libloader_sock_path);
+	if(free_dirname) free(opts->dirname);
 	close(loader_sock);
 	
 	/*pid = fork();
