@@ -782,21 +782,40 @@ uintptr_t setup_trampoline_constraint(struct dynamic_constraint dc, uintptr_t ad
 	return free_addr;
 }
 
-static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, struct mcount_orig_insn *orig)
+void shift_left_dynamic_constraint(struct dynamic_constraint *dc) {
+	for(int i = 0; i < 3; i++){
+		dc->constraint[i] = dc->constraint[i + 1];
+	}
+	dc->constraint[3] = 0;
+}
+
+static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, struct mcount_orig_insn *orig,
+	struct mcount_dynamic_info *mdi, struct mcount_disasm_engine *disasm)
 {
 	void *origin_code_addr;
 	unsigned char call_insn[] = { 0xe8, 0x00, 0x00, 0x00, 0x00 };
 	int64_t target_addr;
 	uintptr_t free_addr;
-	mcount_redirection *red;
+	//mcount_redirection *red;
 	
-	free_addr = setup_trampoline_constraint(dc, addr);
-	if(!free_addr)
+	struct dynamic_constraint recursive_dc = create_constraint(disasm, mdi, addr);
+	if (dc.instr_size < CALL_INSN_SIZE)
 		return INSTRUMENT_FAILED;
 
-	target_addr = free_addr - (addr + CALL_INSN_SIZE);
-	if(target_addr < INT_MIN || target_addr > INT_MAX)
-		return INSTRUMENT_FAILED;
+	for(int i = 4; i > 0; i--){
+		if(dc.constraint[i]){
+			free_addr = setup_trampoline_constraint(dc, addr + 1 + i);
+			if(!free_addr)
+				return INSTRUMENT_FAILED;
+
+			target_addr = free_addr - (addr + CALL_INSN_SIZE);
+			if(target_addr < INT_MIN || target_addr > INT_MAX)
+				return INSTRUMENT_FAILED;
+				//red = lookup_redirection(&redirection_tree, addr + 1 + i, true);
+				//red->insn = orig->insn + 1 + i;
+		}
+		shift_left_dynamic_constraint(&dc);
+	}
 
 	/* patch address */
 	origin_code_addr = (void *)addr;
@@ -804,12 +823,6 @@ static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, s
 	/* build the instrumentation instruction */
 	memcpy(&call_insn[1], &target_addr, CALL_INSN_SIZE - 1);
 
-	for(int i = 0; i < 4; i++){
-		if(dc.constraint[i]){
-			red = lookup_redirection(&redirection_tree, addr + 1 + i, true);
-			red->insn = orig->insn + 1 + i;
-		}
-	}
 
 	memcpy(origin_code_addr, call_insn, CALL_INSN_SIZE);
 	memset(origin_code_addr + CALL_INSN_SIZE, 0x90,  /* NOP */
@@ -899,7 +912,7 @@ static int patch_unsupported_func(struct mcount_dynamic_info *mdi, struct sym *s
 	/* make sure orig->addr same as when called from __dentry__ */
 	orig->addr += CALL_INSN_SIZE;
 
-	ret = patch_code_constraint(dc, sym_addr, orig);
+	ret = patch_code_constraint(dc, sym_addr, orig, mdi, disasm);
 	if(ret == INSTRUMENT_SUCCESS){
 		pr_dbg2("patch unsupported func: %s (patch size: %d)\n",
 			sym->name, dc.instr_size);

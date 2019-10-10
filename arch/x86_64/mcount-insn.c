@@ -7,7 +7,7 @@
 #include <capstone/capstone.h>
 #include <capstone/platform.h>
 
-const uint8_t trap_insn = 0xcc;
+const uint8_t trap_insn = 0xe8;
 
 struct disasm_check_data {
 	uintptr_t		addr;
