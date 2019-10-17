@@ -422,6 +422,7 @@ int mcount_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 struct mcount_orig_insn {
 	struct rb_node		node;
 	unsigned long		addr;
+	unsigned long		orig_addr;
 	void			*orig;
 	void			*insn;
 	int			orig_size;
@@ -445,9 +446,16 @@ struct mcount_disasm_info {
 	bool			modified;
 };
 
+struct mcount_code{
+	void			*insn;
+	unsigned long	orig_addr;
+};
+
 struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
 					  void *jmp_insn, unsigned jmp_size);
-void *mcount_find_code(unsigned long addr);
+struct mcount_orig_insn *mcount_nop_save_code(struct mcount_disasm_info *info,
+					  void *jmp_insn, unsigned jmp_size, unsigned long ret_addr);
+struct mcount_code mcount_find_code(unsigned long addr);
 struct mcount_orig_insn * mcount_find_insn(unsigned long addr);
 void mcount_freeze_code(void);
 
@@ -456,7 +464,8 @@ int mcount_setup_trampoline(struct mcount_dynamic_info *adi);
 void mcount_cleanup_trampoline(struct mcount_dynamic_info *mdi);
 
 int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
-		      struct mcount_disasm_engine *disasm, unsigned min_size);
+		      struct symtab *symtab, int index, struct mcount_disasm_engine *disasm,
+		      unsigned min_size);
 
 void mcount_disasm_init(struct mcount_disasm_engine *disasm);
 void mcount_disasm_finish(struct mcount_disasm_engine *disasm);

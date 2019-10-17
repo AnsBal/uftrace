@@ -45,6 +45,7 @@ enum symtype {
 };
 
 struct sym {
+	uint16_t section;
 	uint64_t addr;
 	unsigned size;
 	enum symtype type;

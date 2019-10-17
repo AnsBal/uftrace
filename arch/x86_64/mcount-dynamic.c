@@ -12,6 +12,7 @@
 #include "utils/symbol.h"
 
 #define PAGE_SIZE  4096
+#define PAGE_ADDR(a)    ((void *)((a) & ~(PAGE_SIZE - 1)))
 #define XRAY_SECT  "xray_instr_map"
 #define MCOUNTLOC_SECT  "__mcount_loc"
 
@@ -84,7 +85,7 @@ int mcount_setup_trampoline(struct mcount_dynamic_info *mdi)
 			pr_err("failed to mmap trampoline for setup");
 	}
 
-	if (mprotect((void *)mdi->text_addr, mdi->text_size,
+	if (mprotect(PAGE_ADDR(mdi->text_addr), mdi->text_size,
 		     PROT_READ | PROT_WRITE | PROT_EXEC)) {
 		pr_dbg("cannot setup trampoline due to protection: %m\n");
 		return -1;
@@ -122,7 +123,7 @@ int mcount_setup_trampoline(struct mcount_dynamic_info *mdi)
 
 void mcount_cleanup_trampoline(struct mcount_dynamic_info *mdi)
 {
-	if (mprotect((void *)mdi->text_addr, mdi->text_size, PROT_EXEC))
+	if (mprotect(PAGE_ADDR(mdi->text_addr), mdi->text_size, PROT_EXEC))
 		pr_err("cannot restore trampoline due to protection");
 }
 
@@ -452,8 +453,50 @@ static void patch_code(struct mcount_dynamic_info *mdi,
 				origin_code_addr + origin_code_size);
 }
 
-static int patch_normal_func(struct mcount_dynamic_info *mdi, struct sym *sym,
-			     struct mcount_disasm_engine *disasm)
+static void patch_code_nop(struct mcount_dynamic_info *mdi,
+		       uintptr_t addr, uint32_t origin_code_size, struct mcount_nop_info *nopi)
+{
+	void *origin_code_addr;
+	unsigned char call_insn[] = { 0xe8, 0x00, 0x00, 0x00, 0x00 };
+	unsigned char jmp8_insn[] = { 0xeb, 0x00};
+	uint32_t target_addr = get_target_addr(mdi, nopi->addr);
+
+	/* patch address */
+	origin_code_addr = (void *)nopi->addr;
+
+	/* build the instrumentation instruction */
+	memcpy(&call_insn[1], &target_addr, CALL_INSN_SIZE - 1);
+
+
+	memcpy(origin_code_addr, call_insn, CALL_INSN_SIZE);
+	memset(origin_code_addr + CALL_INSN_SIZE, 0x90,  /* NOP */
+	       nopi->size - CALL_INSN_SIZE);
+
+	/* flush icache so that cpu can execute the new insn */
+	__builtin___clear_cache(origin_code_addr,
+				origin_code_addr + nopi->size);
+
+
+	target_addr = nopi->addr - (addr + 2);
+	/* patch address */
+	origin_code_addr = (void *)addr;
+
+	/* build the instrumentation instruction */
+	memcpy(&jmp8_insn[1], &target_addr, 1);
+
+	memcpy(origin_code_addr, jmp8_insn, 2);
+	memset(origin_code_addr + 2, 0x90,  /* NOP */
+	       origin_code_size - 2);
+
+	/* flush icache so that cpu can execute the new insn */
+	__builtin___clear_cache(origin_code_addr,
+				origin_code_addr + origin_code_size);
+
+	
+}
+
+static int patch_normal_func(struct mcount_dynamic_info *mdi, struct sym *sym, 
+				 struct mcount_disasm_engine *disasm)
 {
 	uint8_t jmp_insn[14] = { 0xff, 0x25, };
 	uint64_t jmp_target;
@@ -463,10 +506,10 @@ static int patch_normal_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 		.addr = mdi->map->start + sym->addr,
 	};
 	int state;
-
+	
 	state = disasm_check_insns(disasm, mdi, &info);
 	if (state != INSTRUMENT_SUCCESS)
-		return state;
+		return state;	
 
 	pr_dbg2("patch normal func: %s (patch size: %d)\n",
 		sym->name, info.orig_size);
@@ -487,6 +530,48 @@ static int patch_normal_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 	/* make sure orig->addr same as when called from __dentry__ */
 	orig->addr += CALL_INSN_SIZE;
 	patch_code(mdi, info.addr, info.orig_size);
+
+	return INSTRUMENT_SUCCESS;
+}
+
+static int patch_jmp8_func(struct mcount_dynamic_info *mdi, struct sym *sym,
+			    struct symtab *symtab, int index, struct mcount_disasm_engine *disasm)
+{
+	uint8_t jmp_insn[14] = { 0xff, 0x25, };
+	uint64_t jmp_target;
+	struct mcount_nop_info nopi;
+	struct mcount_orig_insn *orig;
+	struct mcount_disasm_info info = {
+		.sym  = sym,
+		.addr = mdi->map->start + sym->addr,
+	};
+	int state;
+
+	state = disasm_jmp8_check_insns(disasm, mdi, &info);
+	if (state != INSTRUMENT_SUCCESS)
+		return state;
+
+	nopi = disasm_find_nops(disasm, mdi, &info, symtab, index);
+	if (nopi.addr == 0)
+		return INSTRUMENT_FAILED;
+
+	pr_dbg2("patch jmp8 func: %s (patch size: %d) \t nop start: %p end %lu  %p\n",
+		sym->name, info.orig_size, nopi.addr, nopi.size, mdi->map->start);
+
+	/*
+	 *  stored origin instruction block:
+	 *  ----------------------
+	 *  | [origin_code_size] |
+	 *  ----------------------
+	 *  | [jmpq    *0x0(rip) |
+	 *  ----------------------
+	 *  | [Return   address] |
+	 *  ----------------------
+	 */
+	jmp_target = info.addr + info.orig_size;
+	memcpy(jmp_insn + JMP_INSN_SIZE, &jmp_target, sizeof(jmp_target));
+	orig = mcount_nop_save_code(&info, jmp_insn, sizeof(jmp_insn), nopi.addr + CALL_INSN_SIZE);
+	patch_code_nop(mdi, info.addr, info.orig_size, &nopi);
 
 	return INSTRUMENT_SUCCESS;
 }
@@ -554,29 +639,39 @@ static int unpatch_mcount_func(struct mcount_dynamic_info *mdi, struct sym *sym)
 }
 
 int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
-		      struct mcount_disasm_engine *disasm,
+		      struct symtab *symtab, int index, struct mcount_disasm_engine *disasm,
 		      unsigned min_size)
 {
 	struct arch_dynamic_info *adi = mdi->arch;
 	int result = INSTRUMENT_SKIPPED;
 
-	if (min_size < CALL_INSN_SIZE)
-		min_size = CALL_INSN_SIZE;
-
-	if (sym->size < min_size)
-		return result;
-
 	switch (adi->type) {
 	case DYNAMIC_XRAY:
+		if (min_size < CALL_INSN_SIZE)
+			min_size = CALL_INSN_SIZE;
+
+		if (sym->size < min_size)
+			return result;
 		result = patch_xray_func(mdi, sym);
 		break;
 
 	case DYNAMIC_FENTRY_NOP:
+		if (min_size < CALL_INSN_SIZE)
+			min_size = CALL_INSN_SIZE;
+
+		if (sym->size < min_size)
+			return result;
 		result = patch_fentry_func(mdi, sym);
 		break;
 
 	case DYNAMIC_NONE:
-		result = patch_normal_func(mdi, sym, disasm);
+		if (min_size < 2)
+			min_size = 2;
+
+		if (sym->size < min_size)
+			return result;
+		//result = patch_normal_func(mdi, sym, disasm);
+		result = patch_jmp8_func(mdi, sym, symtab, index, disasm);
 		break;
 
 	default:

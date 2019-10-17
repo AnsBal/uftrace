@@ -3,6 +3,7 @@
 
 #include "utils/arch.h"
 #include "utils/list.h"
+#include <inttypes.h>
 
 #define mcount_regs  mcount_regs
 
@@ -40,13 +41,34 @@ struct plthook_arch_context {
 	bool	has_plt_sec;
 };
 
+struct mcount_nop_info {
+	uint64_t addr;
+	uint8_t size;
+	uint32_t index;
+};
+
+struct mcount_nops {
+	struct mcount_nop_info infos[128];
+	uint8_t count;
+};
+
 struct mcount_disasm_engine;
 struct mcount_dynamic_info;
 struct mcount_disasm_info;
 struct sym;
+struct symtab;
 
 int disasm_check_insns(struct mcount_disasm_engine *disasm,
 		       struct mcount_dynamic_info *mdi,
 		       struct mcount_disasm_info *info);
+
+int disasm_jmp8_check_insns(struct mcount_disasm_engine *disasm,
+		       struct mcount_dynamic_info *mdi,
+		       struct mcount_disasm_info *info);
+
+struct mcount_nop_info disasm_find_nops(struct mcount_disasm_engine *disasm,
+		       struct mcount_dynamic_info *mdi,
+		       struct mcount_disasm_info *info,
+			   struct symtab *symtab, int index);
 
 #endif /* MCOUNT_ARCH_H */
