@@ -266,6 +266,8 @@ static int load_symbol(struct symtab *symtab, unsigned long prev_sym_value,
 	else
 		sym->name = xstrdup(name);
 
+	sym->section = iter->sym.st_shndx;
+
 	pr_dbg4("[%zd] %c %"PRIx64" + %-5u %s\n", symtab->nr_sym,
 		sym->type, sym->addr, sym->size, sym->name);
 	return 1;

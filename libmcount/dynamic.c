@@ -42,7 +42,7 @@ static struct mcount_orig_insn *lookup_code(struct rb_root *root,
 	struct rb_node *parent = NULL;
 	struct rb_node **p = &root->rb_node;
 	struct mcount_orig_insn *iter;
-
+	//pr_blue("looking %p \n", addr);
 	while (*p) {
 		parent = *p;
 		iter = rb_entry(parent, struct mcount_orig_insn, node);
@@ -67,8 +67,8 @@ static struct mcount_orig_insn *lookup_code(struct rb_root *root,
 	return iter;
 }
 
-struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
-					  void *jmp_insn, unsigned jmp_size)
+static struct mcount_orig_insn *mcount_save_code_addr(struct mcount_disasm_info *info,
+					  void *jmp_insn, unsigned jmp_size, unsigned long ret_addr)
 {
 	struct code_page *cp = NULL;
 	struct mcount_orig_insn *orig;
@@ -98,11 +98,12 @@ struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
 		list_add_tail(&cp->list, &code_pages);
 	}
 
-	orig = lookup_code(&code_tree, info->addr, true);
+	orig = lookup_code(&code_tree, ret_addr, true);
 	orig->insn = cp->page + cp->pos;
 	orig->orig = orig->insn;
 	orig->orig_size = info->orig_size;
 	orig->insn_size = info->copy_size + jmp_size;
+	orig->orig_addr = info->addr + 1; /* FIXME: why +1 ?*/
 
 	if (info->modified) {
 		/* save original instructions before modification */
@@ -117,6 +118,18 @@ struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
 	return orig;
 }
 
+struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
+					  void *jmp_insn, unsigned jmp_size)
+{
+	return mcount_save_code_addr(info, jmp_insn, jmp_size, info->addr);
+}
+
+struct mcount_orig_insn *mcount_nop_save_code(struct mcount_disasm_info *info,
+					  void *jmp_insn, unsigned jmp_size, unsigned long ret_addr)
+{
+	return mcount_save_code_addr(info, jmp_insn, jmp_size, ret_addr);
+}
+
 void mcount_freeze_code(void)
 {
 	struct code_page *cp;
@@ -125,15 +138,23 @@ void mcount_freeze_code(void)
 		mprotect(cp->page, CODE_CHUNK, PROT_READ|PROT_EXEC);
 }
 
-void *mcount_find_code(unsigned long addr)
+struct mcount_code mcount_find_code(unsigned long addr)
 {
 	struct mcount_orig_insn *orig;
-
+	struct mcount_code code;
 	orig = lookup_code(&code_tree, addr, false);
-	if (orig == NULL)
-		return NULL;
+	if (orig == NULL) {
+		pr_blue("addr %p \n", addr);
 
-	return orig->insn;
+		code.insn = NULL;
+		code.orig_addr = NULL;
+		return code;
+	}
+
+	code.insn = orig->insn;
+	code.orig_addr = orig->orig_addr;
+
+	return code;
 }
 
 struct mcount_orig_insn * mcount_find_insn(unsigned long addr)
@@ -152,8 +173,8 @@ __weak void mcount_cleanup_trampoline(struct mcount_dynamic_info *mdi)
 }
 
 __weak int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
-			     struct mcount_disasm_engine *disasm,
-			     unsigned min_size)
+		      struct symtab *symtab, int index, struct mcount_disasm_engine *disasm,
+		      unsigned min_size)
 {
 	return -1;
 }
@@ -375,7 +396,7 @@ static int do_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 
 		for (i = 0; i < symtab->nr_sym; i++) {
 			sym = &symtab->sym[i];
-
+			
 			csu_skip = false;
 			for (k = 0; k < ARRAY_SIZE(csu_skip_syms); k++) {
 				if (!strcmp(sym->name, csu_skip_syms[k])) {
@@ -397,7 +418,7 @@ static int do_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 			}
 
 			found = true;
-			switch (mcount_patch_func(mdi, sym, disasm, min_size)) {
+			switch (mcount_patch_func(mdi, sym, symtab, i, disasm, min_size)) {
 			case INSTRUMENT_FAILED:
 				stats.failed++;
 				break;

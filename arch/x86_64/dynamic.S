@@ -52,12 +52,6 @@ GLOBAL(__dentry__)
 	movq %r8,   8(%rsp)
 	movq %r9,   0(%rsp)
 
-	/* child addr */
-	movq 48(%rsp), %rsi
-
-	/* parent location */
-	lea 56(%rsp), %rdi
-
 	/* mcount_args */
 	movq %rsp, %rdx
 	.cfi_def_cfa_register rdx
@@ -73,11 +67,6 @@ GLOBAL(__dentry__)
 	push %r10
 	push %r11
 
-	call mcount_entry
-
-	/* original stack pointer */
-	movq 24(%rsp), %rdx
-
 	/* child addr */
 	movq 48(%rdx), %rdi
 
@@ -85,10 +74,24 @@ GLOBAL(__dentry__)
 	call mcount_find_code
 
 	/* original stack pointer */
-	movq 24(%rsp), %rdx
+	movq 24(%rsp), %rcx
 
 	/* overwrite return address */
-	movq %rax, 48(%rdx)
+	movq %rax, 48(%rcx)
+
+	/* child addr */
+	movq %rdx, %rsi
+
+	/* parent location */
+	lea 56(%rcx), %rdi
+
+	/* original stack pointer */
+	movq 24(%rsp), %rdx
+
+	call mcount_entry
+
+	/* original stack pointer */
+	movq 24(%rsp), %rdx
 
 	pop  %r11
 	pop  %r10

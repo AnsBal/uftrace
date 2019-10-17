@@ -2,6 +2,7 @@
 #include "mcount-arch.h"
 
 #define CALL_INSN_SIZE  5
+#define JMP8_INSN_SIZE  2
 
 #ifdef HAVE_LIBCAPSTONE
 #include <capstone/capstone.h>
@@ -345,6 +346,8 @@ static bool check_unsupported(struct mcount_disasm_engine *disasm,
 			if (info->addr > target ||
 			    target >= info->addr + info->sym->size) {
 				/* also mark the target function as invalid */
+						pr_blue("bad sym found at %s : %s\t %s\n",
+				info->sym->name, insn->mnemonic, insn->op_str);
 				return !mcount_add_badsym(mdi, insn->address,
 							  target);
 			}
@@ -361,9 +364,10 @@ static bool check_unsupported(struct mcount_disasm_engine *disasm,
 	return true;
 }
 
-int disasm_check_insns(struct mcount_disasm_engine *disasm,
+static int disasm_size_check_insns(struct mcount_disasm_engine *disasm,
 		       struct mcount_dynamic_info *mdi,
-		       struct mcount_disasm_info *info)
+		       struct mcount_disasm_info *info,
+			   uint8_t patch_insn_size)
 {
 	int status;
 	cs_insn *insn = NULL;
@@ -403,7 +407,9 @@ int disasm_check_insns(struct mcount_disasm_engine *disasm,
 
 		if (status > 0) {
 			status = INSTRUMENT_FAILED;
-			pr_dbg3("not supported instruction found at %s : %s\t %s\n",
+			//pr_dbg3("not supported instruction found at %s : %s\t %s\n",
+			//	info->sym->name, insn[i].mnemonic, insn[i].op_str);
+			pr_blue("not instrumentable instruction found at %s : %s\t %s\n",
 				info->sym->name, insn[i].mnemonic, insn[i].op_str);
 			goto out;
 		}
@@ -412,13 +418,15 @@ int disasm_check_insns(struct mcount_disasm_engine *disasm,
 		info->copy_size += size;
 		info->orig_size += insn[i].size;
 
-		if (info->orig_size >= CALL_INSN_SIZE)
+		if (info->orig_size >= patch_insn_size)
 			break;
 	}
 
 	while (++i < count) {
 		if (!check_unsupported(disasm, &insn[i], mdi, info)) {
 			status = INSTRUMENT_FAILED;
+			pr_blue("not supported instruction found at %s : %s\t %s\n",
+				info->sym->name, insn[i].mnemonic, insn[i].op_str);
 			break;
 		}
 	}
@@ -428,6 +436,330 @@ out:
 		cs_free(insn, count);
 
 	return status;
+}
+
+static int prev_sym_index(struct symtab *symtab, int index) {
+	struct sym *sym = &symtab->sym[index];
+	struct sym *prev_sym = &symtab->sym[index];
+	int i;
+	#define JMP8_SIZE 2
+
+	if(index == 0)
+		return 0;
+	
+	for (i = index - 1; i > 0; i--) {
+		prev_sym = &symtab->sym[i];
+		if((sym->addr + JMP8_SIZE) - prev_sym->addr >= 128) {
+			break;	
+		}
+		if (prev_sym->section != sym->section)
+			break;
+	}
+	
+	return i;
+}
+
+static bool is_unreachable_insn(cs_insn *insn_array, uint32_t index, 
+				uint32_t count, 
+				struct mcount_disasm_info *info) 
+{	
+	int i;
+	int j;
+	cs_x86 *x86;
+	cs_detail *detail;
+	bool jump = false;
+	unsigned long target;
+	cs_insn *insn = &insn_array[index];
+	cs_insn *start_insn;
+
+	if(index == 0) {
+		return false;
+	}
+	i = index;
+
+	while(i >= 0 && strcmp(insn->mnemonic, "nop") == 0) {
+		i--;
+		insn = &insn_array[i];
+	}
+
+	pr_blue("previous insn: %s %s \taddr %p \tsize %i\n",
+			 insn->mnemonic, insn->op_str, insn->address, insn->size);
+	
+	if(strcmp(insn->mnemonic, "jmp") != 0 &&
+		strcmp(insn->mnemonic, "ret") != 0) /*  &&
+		strcmp(insn->mnemonic, "call") != 0 */
+		return false;
+
+	start_insn = &insn_array[i + 1];
+
+	for (i = 0; i < count; i++) {
+		insn = &insn_array[i];
+		detail = insn->detail;
+		if (detail == NULL)
+			return false;
+
+		for (j = 0; j < detail->groups_count; j++) {
+			if (detail->groups[j] == CS_GRP_JUMP)
+				jump = true;
+		}
+
+		if (!jump)
+			continue;
+
+		x86 = &insn->detail->x86;
+		for (j = 0; j < x86->op_count; j++) {
+			cs_x86_op *op = &x86->operands[j];
+
+			switch((int)op->type) {
+			case X86_OP_IMM:
+				target = op->imm;
+
+				if (start_insn->address <= target &&
+					target <= insn_array[index].address) 
+				{
+					pr_blue("jump to unreachable_insn: %s %s \taddr %p \tsize %i\n",
+							insn->mnemonic, insn->op_str, insn->address, insn->size);
+					return false;
+				}
+				break;
+			//case X86_OP_MEM:
+			//case X86_OP_REG:
+			//	return false;
+			default:
+				break;
+			}
+		}
+	}
+
+	return true;
+}
+
+static bool is_func_pad(struct mcount_nop_info *nopi,
+ 				struct mcount_dynamic_info *mdi, 
+				struct symtab *symtab, 
+				int psi,
+				int csi) 
+{	
+	struct sym* prev_sym;
+	struct sym* next_sym;
+	unsigned long next_start;
+	unsigned long prev_end;
+	int i;
+
+	for (i = psi; i < csi; i++){
+		
+		prev_sym = &symtab->sym[i];
+		next_sym = &symtab->sym[i + 1];
+
+		prev_end = mdi->map->start + prev_sym->addr + prev_sym->size;
+		next_start = mdi->map->start + next_sym->addr;
+
+		if(nopi->addr >= prev_end && next_start > nopi->addr) {
+			
+			pr_blue("FUNC PAD: %p in start %p  end %p \n", nopi->addr, prev_end, next_start);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static struct mcount_nops get_potential_nops(cs_insn *insn, uint32_t count, 
+				struct mcount_disasm_info *info)
+{
+	struct mcount_nop_info *nopi;
+	uint32_t i;
+	uint32_t dbg_i;
+	struct mcount_nops nops= {
+		.count = 0,
+	};
+
+	//func_pad_index(insn, count, info);
+
+	for (i = 0 ; i < count ; i++) {
+		if (strcmp(insn[i].mnemonic, "nop") != 0)
+			continue;
+
+		if (insn[i].size >= 5 /*&& insn[i].size < 8*/) {
+		 	/* we can use a relative call32 */
+
+			/* skip insn if offset is out of range */
+			int offset = insn[i].address - (info->addr + 2);
+			if (offset < SCHAR_MIN || offset > SCHAR_MAX)
+				continue;
+
+			pr_blue("NOP found insn: %s %s \taddr %p \tsize %i\n",
+				 insn[i].mnemonic, insn[i].op_str, insn[i].address, insn[i].size);
+		
+			nopi = &nops.infos[nops.count++];
+			nopi->addr = insn[i].address;
+			nopi->size = insn[i].size;
+			nopi->index = i;
+			
+			if(nops.count == 1) {
+				dbg_i = i;
+			}
+
+		} else if (insn[i].size >= 8) { // we dont get here for now
+			/* we can use PUSH PUSH NOP call 00 00 00 00 */
+			if (insn[i].size == 8) {
+				nopi = &nops.infos[nops.count++];
+				nopi->addr = insn[i].address + (insn[i].size - CALL_INSN_SIZE);
+				nopi->size = CALL_INSN_SIZE;
+				nopi->index = i;
+
+			}
+			else if (insn[i].size == 9) {
+
+			}
+
+		} else if (insn[i].size < 5) { 
+			/*
+			 * we first check the 2nd insn (it could be a nop) 
+			 * else we can use it as trampoline to a 5 byte (or more) nop
+			 */
+			continue;
+		}
+	}
+
+	if(nops.count == 0 )
+		pr_blue("No potential NOP found\n");
+	else 
+		pr_blue("Potential NOP found insn: %s %s size: %i\n", insn[dbg_i].mnemonic,
+					 insn[dbg_i].op_str, insn[dbg_i].size);
+
+	return nops;
+}
+
+struct mcount_nop_info lookup_viable_nop(cs_insn *insn, uint32_t count, 
+			struct mcount_nops* nops,
+			struct mcount_dynamic_info *mdi,
+			struct mcount_disasm_info *info,
+			struct symtab *symtab, int index,
+			int prev_index) 
+{
+	struct mcount_nop_info *nopi;
+	struct mcount_nop_info ret;
+	int i;
+
+	/* ~3% loss 20-25 sym */
+	for (i = 0; i < nops->count; i++) {
+		nopi = &nops->infos[i];
+		if(is_func_pad(nopi, mdi, symtab, prev_index, index)) {
+			ret = *nopi;
+			return ret;
+		} else if (is_unreachable_insn(insn, nopi->index, count, info)) {
+			ret = *nopi;
+			return ret;
+		} else {
+			switch(nopi->size) {
+			case 8: 
+				ret.size = 5;
+				ret.addr = nopi->addr + 3;
+			return ret;
+
+				break;
+			case 9: 
+				ret.size = 5;
+				ret.addr = nopi->addr + 4;
+			return ret;
+
+				break;
+			case 10: 
+				ret.size = 5;
+				ret.addr = nopi->addr + 5;
+			return ret;
+
+				break;
+			}
+			pr_blue("reachable size: %i\n", nopi->size);
+
+			continue;
+		}
+	}
+	
+	if(nops->count != 0)
+		pr_blue("not viable\n");
+
+	return ret;
+}
+
+struct mcount_nop_info disasm_find_nops(struct mcount_disasm_engine *disasm,
+		       struct mcount_dynamic_info *mdi,
+		       struct mcount_disasm_info *info,
+			   struct symtab *symtab, int index)
+{
+	cs_insn *insn = NULL;
+	uint32_t count;
+	uint8_t endbr64[] = { 0xf3, 0x0f, 0x1e, 0xfa };
+	struct mcount_nops nops;
+	struct mcount_nop_info ret;
+
+	int prev_index = prev_sym_index(symtab, index);
+	struct sym* prev_sym = &symtab->sym[prev_index];
+	unsigned long prev_addr = mdi->map->start + prev_sym->addr;
+
+	count = cs_disasm(disasm->engine, (void *)prev_addr, info->sym->addr - prev_sym->addr,
+			  prev_addr, 0, &insn);
+	if (count == 0 && !memcmp((void *)prev_addr, endbr64, sizeof(endbr64))) {
+		/* old version of capstone doesn't recognize ENDBR64 insn */
+		unsigned long addr = prev_addr + sizeof(endbr64);
+
+		info->orig_size += sizeof(endbr64);
+		info->copy_size += sizeof(endbr64);
+
+		count = cs_disasm(disasm->engine, (void *)addr,
+				   info->sym->addr - prev_sym->addr - sizeof(endbr64),
+				   addr, 0, &insn);
+	}
+
+	pr_blue("\n------------sym: %s (%p - %p)  \tprev_sym: %s (%p - %p)--------------\n",	
+			info->sym->name, info->sym->addr, info->sym->size, prev_sym->name, prev_sym->addr, prev_sym->size);
+
+	nops = get_potential_nops(insn, count, info);
+	ret = lookup_viable_nop(insn, count, &nops, mdi, info, symtab, index, prev_index);
+	if (count)
+		cs_free(insn, count);
+	
+
+	/* look 128 byte after the symbol */
+	if(ret.addr == 0) { 
+		count = cs_disasm(disasm->engine, (void *)info->addr, 128,
+				info->addr, 0, &insn);
+		if (count == 0 && !memcmp((void *)prev_addr, endbr64, sizeof(endbr64))) {
+			/* old version of capstone doesn't recognize ENDBR64 insn */
+			unsigned long addr = prev_addr + sizeof(endbr64);
+
+			info->orig_size += sizeof(endbr64);
+			info->copy_size += sizeof(endbr64);
+
+			count = cs_disasm(disasm->engine, (void *)addr,
+					info->sym->addr - prev_sym->addr - sizeof(endbr64),
+					addr, 0, &insn);
+		}
+
+		nops = get_potential_nops(insn, count, info);
+		ret = lookup_viable_nop(insn, count, &nops, mdi, info, symtab, index, prev_index);
+		if (count)
+			cs_free(insn, count);
+	}
+
+	return ret;
+}
+
+
+int disasm_check_insns(struct mcount_disasm_engine *disasm,
+		       struct mcount_dynamic_info *mdi,
+		       struct mcount_disasm_info *info)
+{
+	return disasm_size_check_insns(disasm, mdi, info, CALL_INSN_SIZE);
+}
+
+int disasm_jmp8_check_insns(struct mcount_disasm_engine *disasm,
+		       struct mcount_dynamic_info *mdi,
+		       struct mcount_disasm_info *info)
+{
+	return disasm_size_check_insns(disasm, mdi, info, JMP8_INSN_SIZE);
 }
 
 #else /* HAVE_LIBCAPSTONE */
@@ -440,3 +772,4 @@ int disasm_check_insns(struct mcount_disasm_engine *disasm,
 }
 
 #endif /* HAVE_LIBCAPSTONE */
+
