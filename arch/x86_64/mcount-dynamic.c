@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <dirent.h>
 #include <pthread.h> 
+#include <time.h>
+#include <stdio.h>
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "dynamic"
@@ -882,6 +884,15 @@ static int unpatch_mcount_func(struct mcount_dynamic_info *mdi, struct sym *sym)
 	return INSTRUMENT_SKIPPED;
 }
 
+void write_time(struct timespec* start, struct timespec* stop) {
+	double time = (stop->tv_sec - start->tv_sec) * 1e6 +
+			 (stop->tv_nsec - start->tv_nsec) / 1e3; 
+	pr_blue("TIME %f\n", time);
+	FILE *out = fopen("benchmark_insertion", "a");  
+	fprintf(out, "%f\n", time);  
+	fclose(out);
+}
+
 int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 		      struct symtab *symtab, int index, struct mcount_disasm_engine *disasm,
 		      unsigned min_size)
@@ -914,7 +925,15 @@ int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 
 		if (sym->size < min_size)
 			return result;
+			
+		struct timespec start, stop;
+		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start);
+
 		result = patch_jmp8_func(mdi, sym, symtab, index, disasm);
+
+		clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &stop);
+		write_time(&start, &stop);
+
 		if (result != INSTRUMENT_SUCCESS) {
 			if (min_size < CALL_INSN_SIZE)
 				min_size = CALL_INSN_SIZE;
