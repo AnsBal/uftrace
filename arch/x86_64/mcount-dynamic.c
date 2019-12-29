@@ -1,6 +1,9 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <signal.h>
+#include <dirent.h>
+#include <pthread.h> 
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "dynamic"
@@ -18,6 +21,8 @@
 
 #define CALL_INSN_SIZE  5
 #define JMP_INSN_SIZE   6
+const uint8_t trap_insn = 0xcc;
+#define REG(name) REG_R##name
 
 /* target instrumentation function it needs to call */
 extern void __fentry__(void);
@@ -51,6 +56,61 @@ struct arch_dynamic_info {
 	unsigned			xrmap_count;
 	unsigned			nr_mcount_loc;
 };
+
+static struct rb_root redirection_tree = RB_ROOT;
+
+
+void install_trap_handler()
+{
+	struct sigaction act;
+
+	sigaction(SIGTRAP, NULL, &act); /* get current trap handler */
+	/*
+	* reuse current trap handler and set mcount_dynamic_trap as the
+	* master trap handler 
+	*/
+	sigaction(SIGTRAP, &act, NULL);
+}
+
+struct sigaction old_handler;
+void mcount_sigusr_handler(int sig_number, siginfo_t* sig, void* _ctx);
+void install_sigusr_handler(){
+	struct sigaction sa;
+	sa.sa_flags = SA_SIGINFO;
+	sa.sa_sigaction = &mcount_sigusr_handler;
+	sigaction(SIGUSR1, &sa, &old_handler);
+}
+
+static mcount_redirection *lookup_redirection(struct rb_root *root,
+					    unsigned long addr, bool create)
+{
+	struct rb_node *parent = NULL;
+	struct rb_node **p = &root->rb_node;
+	mcount_redirection *iter;
+
+	while (*p) {
+		parent = *p;
+		iter = rb_entry(parent, mcount_redirection, node);
+
+		if (iter->addr == addr)
+			return iter;
+
+		if (iter->addr > addr)
+			p = &parent->rb_left;
+		else
+			p = &parent->rb_right;
+	}
+
+	if (!create)
+		return NULL;
+
+	iter = xmalloc(sizeof(*iter));
+	iter->addr = addr;
+
+	rb_link_node(&iter->node, parent, p);
+	rb_insert_color(&iter->node, root);
+	return iter;
+}
 
 int mcount_setup_trampoline(struct mcount_dynamic_info *mdi)
 {
@@ -116,6 +176,9 @@ int mcount_setup_trampoline(struct mcount_dynamic_info *mdi)
 		memcpy((void *)mdi->trampoline, trampoline, sizeof(trampoline));
 		memcpy((void *)mdi->trampoline + sizeof(trampoline),
 		       &dentry_addr, sizeof(dentry_addr));
+
+		install_trap_handler();
+		install_sigusr_handler();
 #endif
 	}
 	return 0;
@@ -367,6 +430,150 @@ static int patch_xray_func(struct mcount_dynamic_info *mdi, struct sym *sym)
 	return ret;
 }
 
+void mcount_dynamic_trap(int sig, siginfo_t* info, void* _ctx)
+{
+	mcount_redirection *red;
+	/* (%rip) - 1 is the addr of the trap instruction */
+	unsigned long addr = ((ucontext_t*)_ctx)->uc_mcontext.gregs[REG(IP)] - 1;
+
+	red = lookup_redirection(&redirection_tree, addr, false);
+	if (red == NULL){
+		/* raise sigaction and run normal handler */
+		if(mcount_user_handler.sa_handler || mcount_user_handler.sa_sigaction)
+		{
+			if(mcount_user_handler.sa_flags & SA_SIGINFO)
+				mcount_user_handler.sa_sigaction(sig, info, _ctx);
+			else
+				mcount_user_handler.sa_handler(sig);
+		} else
+		{
+            exit(128 + sig);
+        }
+	} else {
+		/* redirect thread to original instruction */
+		((ucontext_t*)_ctx)->uc_mcontext.gregs[REG(IP)] = (unsigned long) red->insn;
+	}
+
+}
+
+// Declaration of thread condition variable 
+pthread_cond_t cond1 = PTHREAD_COND_INITIALIZER; 
+// declaring mutex 
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER; 
+	
+struct sig_data {
+	int th_counter;
+	int nr_thread;
+	struct mcount_orig_insn* orig;
+};
+
+void mcount_sigusr_handler(int sig_number, siginfo_t* sig, void* _ctx)
+{
+	struct sig_data* sd = sig->si_value.sival_ptr;
+	struct mcount_orig_insn *orig;
+
+	if(sd == NULL) {
+		//TODO execute the appropriate handler based on whom raised the signal (us or the application)
+		if(old_handler.sa_handler || old_handler.sa_sigaction)
+		{
+			if(old_handler.sa_flags & SA_SIGINFO)
+				old_handler.sa_sigaction(sig_number, sig, _ctx);
+			else
+				old_handler.sa_handler(sig_number);
+		}
+	} else {
+		orig = sd->orig;
+	
+		if(orig == NULL) {
+			/* 
+			* Manual Volume 3A: System Programming Guide section  
+			* “Handling Self- and Cross-Modifying Code.” 
+			* force the processor to execute a synchronizing instruction, prior 
+			* to execution of the new code.
+			*/
+			asm volatile (
+			"CPUID\n\t"/*serialize*/
+			::: "%rax", "%rbx", "%rcx", "%rdx");
+		} else {
+			unsigned long rip = ((ucontext_t*)_ctx)->uc_mcontext.gregs[REG(IP)];
+			/* orig->orig_addr point to the orig addr + 1 because 
+			*  the border is not included when looking for sym by addr.
+			*/
+			if(rip >= orig->orig_addr && rip < orig->orig_addr + orig->orig_size - 1)
+				/* redirect thread to original instruction */
+				((ucontext_t*)_ctx)->uc_mcontext.gregs[REG(IP)] = (unsigned long) orig->insn + (rip - orig->orig_addr - 1);
+		}
+
+		pthread_mutex_lock(&lock);
+		if(++sd->th_counter >= sd->nr_thread) {
+			pthread_cond_signal(&cond1);
+		}
+		pthread_mutex_unlock(&lock);
+	}
+}
+
+void signal_all_threads(struct mcount_orig_insn *orig){
+	DIR *dir;
+	struct dirent *entry;
+	char str[128];
+	char pid[10];
+	int tid;
+
+	strcpy(str, "/proc/");
+	sprintf(pid, "%d", getpid());
+	strcat(str, pid);
+	strcat(str, "/task");
+
+	struct sig_data sd = {0};
+	sd.orig = orig;
+
+	siginfo_t sig;
+	sig.si_code = SI_QUEUE;
+	sig.si_pid = getpid();
+	sig.si_uid = getuid();
+
+ 	pthread_cond_init(&cond1, NULL);
+    pthread_mutex_init(&lock, NULL);
+
+	if ((dir = opendir(str)) == NULL)
+		perror("opendir() error");
+	else {
+		while ((entry = readdir(dir)) != NULL) {
+			if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+				sd.nr_thread++;
+			}
+		}
+		sd.nr_thread--;
+		rewinddir(dir);
+		while ((entry = readdir(dir)) != NULL) {
+			if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+				sscanf(entry->d_name, "%d", &tid); 
+				if(tid != syscall(SYS_gettid)){
+					//syscall(SYS_tgkill, getpid(), tid, SIGUSR1);
+					sig.si_value.sival_ptr = &sd;
+					syscall(SYS_rt_tgsigqueueinfo, getpid(), tid, SIGUSR1, &sig);
+				}
+			}
+		}
+		
+		pthread_mutex_lock(&lock);
+        struct timespec max_wait = {0, 0};
+ 		clock_gettime(CLOCK_REALTIME, &max_wait);
+        max_wait.tv_sec += 1;
+		while (sd.th_counter < sd.nr_thread) {
+			pthread_cond_timedwait(&cond1, &lock, &max_wait);
+		}
+		pthread_mutex_unlock(&lock);
+		
+		//pthread_cond_wait(&cond1, &lock);
+		closedir(dir);
+	}
+}
+
+void issue_cpuid(){
+	signal_all_threads(NULL);
+}
+
 /*
  *  we overwrite instructions over 5bytes from start of function
  *  to call '__dentry__' that seems similar like '__fentry__'.
@@ -413,15 +620,26 @@ static int patch_xray_func(struct mcount_dynamic_info *mdi, struct sym *sym)
  * Patch the instruction to the address as given for arguments.
  */
 static void patch_code(struct mcount_dynamic_info *mdi,
-		       uintptr_t addr, uint32_t origin_code_size)
+		       uintptr_t addr, uint32_t origin_code_size,
+			   struct mcount_orig_insn *orig)
 {
 	void *origin_code_addr;
 	unsigned char call_insn[] = { 0xe8, 0x00, 0x00, 0x00, 0x00 };
 	uint32_t target_addr = get_target_addr(mdi, addr);
+	mcount_redirection *red;
 
 	/* patch address */
 	origin_code_addr = (void *)addr;
 
+	/* Add a redirection */
+	red = lookup_redirection(&redirection_tree, addr, true);
+	red->insn = orig->insn;
+
+	/* Detour the region */
+	memcpy(origin_code_addr, &trap_insn, 1);
+
+	signal_all_threads(orig);
+	
 	/* build the instrumentation instruction */
 	memcpy(&call_insn[1], &target_addr, CALL_INSN_SIZE - 1);
 
@@ -444,7 +662,16 @@ static void patch_code(struct mcount_dynamic_info *mdi,
 	 * dynamic: 0x400553[01]:nop
 	 * dynamic: 0x400554[01]:nop
 	 */
-	memcpy(origin_code_addr, call_insn, CALL_INSN_SIZE);
+	
+	/* Patch the offset */
+	memcpy(origin_code_addr + 1, call_insn + 1, CALL_INSN_SIZE - 1);
+
+	/* Issue CPUID on each processor */
+	issue_cpuid();
+
+	/* Patch the opcode */
+	memcpy(origin_code_addr, call_insn, 1);
+
 	memset(origin_code_addr + CALL_INSN_SIZE, 0x90,  /* NOP */
 	       origin_code_size - CALL_INSN_SIZE);
 
@@ -454,14 +681,16 @@ static void patch_code(struct mcount_dynamic_info *mdi,
 }
 
 static void patch_code_nop(struct mcount_dynamic_info *mdi,
-		       uintptr_t addr, uint32_t origin_code_size, struct mcount_nop_info *nopi)
+		       uintptr_t addr, uint32_t origin_code_size, struct mcount_nop_info *nopi,
+			   struct mcount_orig_insn *orig)
 {
 	void *origin_code_addr;
 	unsigned char call_insn[] = { 0xe8, 0x00, 0x00, 0x00, 0x00 };
 	unsigned char jmp8_insn[] = { 0xeb, 0x00};
 	uint32_t target_addr = get_target_addr(mdi, nopi->addr);
+	mcount_redirection *red;
 
-	/* patch address */
+	/* NOP patch address */
 	origin_code_addr = (void *)nopi->addr;
 
 	/* build the instrumentation instruction */
@@ -478,21 +707,36 @@ static void patch_code_nop(struct mcount_dynamic_info *mdi,
 
 
 	target_addr = nopi->addr - (addr + 2);
-	/* patch address */
+	/* Probe site patch address */
 	origin_code_addr = (void *)addr;
+
+	/* Add a redirection */
+	red = lookup_redirection(&redirection_tree, addr, true);
+	red->insn = orig->insn;
+
+	/* Detour the region */
+	memcpy(origin_code_addr, &trap_insn, 1);
+
+	signal_all_threads(orig);
 
 	/* build the instrumentation instruction */
 	memcpy(&jmp8_insn[1], &target_addr, 1);
 
-	memcpy(origin_code_addr, jmp8_insn, 2);
+	/* Patch the offset */
+	memcpy(origin_code_addr + 1, jmp8_insn + 1, 1);
+
+	/* Issue CPUID on each processor */
+	issue_cpuid();
+
+	/* Patch the opcode */
+	memcpy(origin_code_addr, jmp8_insn, 1);
+
 	memset(origin_code_addr + 2, 0x90,  /* NOP */
 	       origin_code_size - 2);
 
 	/* flush icache so that cpu can execute the new insn */
 	__builtin___clear_cache(origin_code_addr,
 				origin_code_addr + origin_code_size);
-
-	
 }
 
 static int patch_normal_func(struct mcount_dynamic_info *mdi, struct sym *sym, 
@@ -528,13 +772,13 @@ static int patch_normal_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 	memcpy(jmp_insn + JMP_INSN_SIZE, &jmp_target, sizeof(jmp_target));
 
 	if (info.has_jump)
-		orig = mcount_save_code(&info, jmp_insn, 0);
+		orig = mcount_save_code_addr(&info, jmp_insn, 0, info.addr + CALL_INSN_SIZE);		
 	else
-		orig = mcount_save_code(&info, jmp_insn, sizeof(jmp_insn));
+		orig = mcount_save_code_addr(&info, jmp_insn, sizeof(jmp_insn), info.addr + CALL_INSN_SIZE);			
 
 	/* make sure orig->addr same as when called from __dentry__ */
-	orig->addr += CALL_INSN_SIZE;
-	patch_code(mdi, info.addr, info.orig_size);
+	//orig->addr += CALL_INSN_SIZE;
+	patch_code(mdi, info.addr, info.orig_size, orig);
 
 	return INSTRUMENT_SUCCESS;
 }
@@ -575,8 +819,8 @@ static int patch_jmp8_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 	 */
 	jmp_target = info.addr + info.orig_size;
 	memcpy(jmp_insn + JMP_INSN_SIZE, &jmp_target, sizeof(jmp_target));
-	orig = mcount_nop_save_code(&info, jmp_insn, sizeof(jmp_insn), nopi.addr + CALL_INSN_SIZE);
-	patch_code_nop(mdi, info.addr, info.orig_size, &nopi);
+	orig = mcount_save_code_addr(&info, jmp_insn, sizeof(jmp_insn), nopi.addr + CALL_INSN_SIZE);
+	patch_code_nop(mdi, info.addr, info.orig_size, &nopi, orig);
 
 	return INSTRUMENT_SUCCESS;
 }
@@ -676,8 +920,15 @@ int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 
 		if (sym->size < min_size)
 			return result;
-		//result = patch_normal_func(mdi, sym, disasm);
 		result = patch_jmp8_func(mdi, sym, symtab, index, disasm);
+		if (result != INSTRUMENT_SUCCESS) {
+			if (min_size < CALL_INSN_SIZE)
+				min_size = CALL_INSN_SIZE;
+
+			if (sym->size < min_size)
+				return result;
+			result = patch_normal_func(mdi, sym, disasm);
+		}
 		break;
 
 	default:

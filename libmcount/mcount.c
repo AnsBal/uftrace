@@ -1639,6 +1639,35 @@ static void mcount_script_init(enum uftrace_pattern_type patt_type)
 	strv_free(&info.cmds);
 }
 
+#include <pthread.h>
+void *worker_thread(void *data)	
+{
+
+while(1){
+	char ch;
+   FILE *fp;
+
+   fp = fopen("program.txt", "r"); // read mode
+
+   if (fp == NULL)
+   {
+      perror("Error while opening the file.\n");
+      exit(EXIT_FAILURE);
+   }
+
+   //pr_blue("The contents of %s file are:\n", "program.txt");
+
+   while((ch = fgetc(fp)) != EOF);
+      //printf("%c", ch);
+
+   fclose(fp);
+   sleep(5);
+}
+	
+
+    return NULL;
+}
+
 static __used void mcount_startup(void)
 {
 	char *pipefd_str;
@@ -1683,6 +1712,10 @@ static __used void mcount_startup(void)
 	script_str = getenv("UFTRACE_SCRIPT");
 	nest_libcall = !!getenv("UFTRACE_NEST_LIBCALL");
 	pattern_str = getenv("UFTRACE_PATTERN");
+
+ 	pthread_t thread_id;
+	//pthread_create(&thread_id, NULL, &worker_thread, NULL);
+	//pthread_create(&thread_id, NULL, &worker_thread, NULL);
 
 	page_size_in_kb = getpagesize() / KB;
 
