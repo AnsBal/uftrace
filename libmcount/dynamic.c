@@ -67,7 +67,7 @@ static struct mcount_orig_insn *lookup_code(struct rb_root *root,
 	return iter;
 }
 
-static struct mcount_orig_insn *mcount_save_code_addr(struct mcount_disasm_info *info,
+struct mcount_orig_insn *mcount_save_code_addr(struct mcount_disasm_info *info,
 					  void *jmp_insn, unsigned jmp_size, unsigned long ret_addr)
 {
 	struct code_page *cp = NULL;
@@ -103,7 +103,7 @@ static struct mcount_orig_insn *mcount_save_code_addr(struct mcount_disasm_info 
 	orig->orig = orig->insn;
 	orig->orig_size = info->orig_size;
 	orig->insn_size = info->copy_size + jmp_size;
-	orig->orig_addr = info->addr + 1; /* FIXME: why +1 ?*/
+	orig->orig_addr = info->addr + 1; /* The border is not included when looking for sym by addr */
 
 	if (info->modified) {
 		/* save original instructions before modification */
@@ -116,18 +116,6 @@ static struct mcount_orig_insn *mcount_save_code_addr(struct mcount_disasm_info 
 
 	cp->pos += patch_size;
 	return orig;
-}
-
-struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
-					  void *jmp_insn, unsigned jmp_size)
-{
-	return mcount_save_code_addr(info, jmp_insn, jmp_size, info->addr);
-}
-
-struct mcount_orig_insn *mcount_nop_save_code(struct mcount_disasm_info *info,
-					  void *jmp_insn, unsigned jmp_size, unsigned long ret_addr)
-{
-	return mcount_save_code_addr(info, jmp_insn, jmp_size, ret_addr);
 }
 
 void mcount_freeze_code(void)
@@ -144,10 +132,9 @@ struct mcount_code mcount_find_code(unsigned long addr)
 	struct mcount_code code;
 	orig = lookup_code(&code_tree, addr, false);
 	if (orig == NULL) {
-		pr_blue("addr %p \n", addr);
-
-		code.insn = NULL;
-		code.orig_addr = NULL;
+		pr_err_ns("Lookup code failed !");
+		//code.insn = NULL;
+		//code.orig_addr = 0;
 		return code;
 	}
 

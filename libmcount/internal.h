@@ -16,6 +16,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/syscall.h>
+#include <signal.h>
 
 #ifdef HAVE_LIBCAPSTONE
 # include <capstone/capstone.h>
@@ -405,6 +406,11 @@ struct mcount_dynamic_info {
 	void *arch;
 };
 
+#ifdef HAVE_LIBCAPSTONE
+struct sigaction mcount_user_handler;
+void mcount_dynamic_trap(int sig, siginfo_t* info, void* _ctx);
+#endif
+
 struct mcount_disasm_engine {
 #ifdef HAVE_LIBCAPSTONE
 	csh		engine;
@@ -429,6 +435,8 @@ struct mcount_orig_insn {
 	int			insn_size;
 };
 
+typedef struct mcount_orig_insn mcount_redirection;
+
 /*
  * mcount_disasm_info - information for dynamic patch
  * @sym : symbol for the function
@@ -451,9 +459,7 @@ struct mcount_code{
 	unsigned long	orig_addr;
 };
 
-struct mcount_orig_insn *mcount_save_code(struct mcount_disasm_info *info,
-					  void *jmp_insn, unsigned jmp_size);
-struct mcount_orig_insn *mcount_nop_save_code(struct mcount_disasm_info *info,
+struct mcount_orig_insn *mcount_save_code_addr(struct mcount_disasm_info *info,
 					  void *jmp_insn, unsigned jmp_size, unsigned long ret_addr);
 struct mcount_code mcount_find_code(unsigned long addr);
 struct mcount_orig_insn * mcount_find_insn(unsigned long addr);
