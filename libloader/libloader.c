@@ -28,7 +28,7 @@ static void epoll_add(int efd, int fd, unsigned event)
 	};
 
 	if (epoll_ctl(efd, EPOLL_CTL_ADD, fd, &ev) < 0)
-		pr_red("epoll add failed");
+		pr_err("epoll add failed");
 }
 
 static void send_reply(int sock, unsigned short type)
@@ -58,32 +58,32 @@ static void recv_start_tracing_request(int sock, int len)
 	unsigned short reply_type = LIBLODAER_SUCESS;
 
 	if (len < sizeof(request_start_tracing)){
-		pr_red("invalid message length\n");
+		pr_err("invalid message length\n");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (read_all(sock, &request_start_tracing, sizeof(request_start_tracing)) < 0) {
-		pr_red("recv request_start_tracing failed");
+		pr_err("recv request_start_tracing failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	libname = xmalloc(request_start_tracing.namelen + 1);
 	if (read_all(sock, libname, request_start_tracing.namelen) < 0) {
-		pr_red("recv request_start_tracing failed");
+		pr_err("recv request_start_tracing failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	libname[request_start_tracing.namelen] = '\0';
 	
 	void* handle = dlopen(libname, RTLD_NOLOAD | RTLD_LAZY);
 	if (!handle) {
-		pr_red("start tracing failed");
+		pr_err("start tracing failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	
 	void (*start_tracing)(void);
 	start_tracing = dlsym(handle, "start_tracing");
 	if (!start_tracing) {
-		pr_red("start tracing request failed");		
+		pr_err("start tracing request failed");		
 		reply_type = LIBLOADER_FAILURE;
 	}
 
@@ -100,32 +100,32 @@ static void recv_stop_tracing_request(int sock, int len)
 	unsigned short reply_type = LIBLODAER_SUCESS;
 
 	if (len < sizeof(request_stop_tracing)){
-		pr_red("invalid message length\n");
+		pr_err("invalid message length\n");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (read_all(sock, &request_stop_tracing, sizeof(request_stop_tracing)) < 0) {
-		pr_red("recv request_stop_tracing failed");
+		pr_err("recv request_stop_tracing failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	libname = xmalloc(request_stop_tracing.namelen + 1);
 	if (read_all(sock, libname, request_stop_tracing.namelen) < 0) {
-		pr_red("recv request_stop_tracing failed");
+		pr_err("recv request_stop_tracing failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	libname[request_stop_tracing.namelen] = '\0';
 	
 	void* handle = dlopen(libname, RTLD_NOLOAD | RTLD_LAZY);
 	if (!handle) {
-		pr_red("stop tracing failed");
+		pr_err("stop tracing failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	
 	void (*stop_tracing)(void);
 	stop_tracing = dlsym(handle, "stop_tracing");
 	if (!stop_tracing) {
-		pr_red("stop tracing request failed");		
+		pr_err("stop tracing request failed");		
 		reply_type = LIBLOADER_FAILURE;
 	}
 
@@ -142,30 +142,30 @@ static void recv_dlclose_request(int sock, int len)
 	unsigned short reply_type = LIBLODAER_SUCESS;
 
 	if (len < sizeof(request_dlclose)) {
-		pr_red("invalid message length\n");
+		pr_err("invalid message length\n");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (read_all(sock, &request_dlclose, sizeof(request_dlclose)) < 0){
-		pr_red("recv request_dlclose failed");
+		pr_err("recv request_dlclose failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	libname = xmalloc(request_dlclose.namelen + 1);
 	if (read_all(sock, libname, request_dlclose.namelen) < 0) {
-		pr_red("recv request_dlclose failed");
+		pr_err("recv request_dlclose failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	libname[request_dlclose.namelen] = '\0';
 	
 	void* handle = dlopen(libname, RTLD_NOLOAD | RTLD_LAZY);
 	if (!handle) {
-		pr_red("dlclose request failed");
+		pr_err("dlclose request failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (dlclose(handle)) {
-		pr_red("dlclose request failed");
+		pr_err("dlclose request failed");
 		reply_type = LIBLOADER_FAILURE;
 	} 
 	
@@ -181,25 +181,25 @@ static void recv_dlopen_request(int sock, int len)
 	unsigned short reply_type = LIBLODAER_SUCESS;
 
 	if (len < sizeof(request_dlopen)) {
-		pr_red("invalid message length\n");
+		pr_err("invalid message length\n");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (read_all(sock, &request_dlopen, sizeof(request_dlopen)) < 0) {
-		pr_red("recv request_env failed");
+		pr_err("recv request_env failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	libname = xmalloc(request_dlopen.namelen + 1);
 	if (read_all(sock, libname, request_dlopen.namelen) < 0){
-		pr_red("recv request_env failed");
+		pr_err("recv request_env failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	libname[request_dlopen.namelen] = '\0';
 
 	void* handle = dlopen(libname, request_dlopen.flags);
 	if (!handle) {
-		pr_red("dlopen request failed");
+		pr_err("dlopen request failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	
@@ -216,36 +216,36 @@ static void recv_env_request(int sock, int len)
 	unsigned short reply_type = LIBLODAER_SUCESS;
 
 	if (len < sizeof(request_env)){
-		pr_red("invalid message length\n");
+		pr_err("invalid message length\n");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	if (read_all(sock, &request_env, sizeof(request_env)) < 0){
-		pr_red("recv request_env failed");
+		pr_err("recv request_env failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	varname = xmalloc(request_env.len + 1);
 	if (read_all(sock, varname, request_env.len) < 0){
-		pr_red("recv request_env failed");
+		pr_err("recv request_env failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	varname[request_env.len] = '\0';
 
 	if (read_all(sock, &request_env, sizeof(request_env)) < 0){
-		pr_red("recv request_env failed");
+		pr_err("recv request_env failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
 	value = xmalloc(request_env.len + 1);
 	if (read_all(sock, value, request_env.len) < 0){
-		pr_red("recv request_env failed");
+		pr_err("recv request_env failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 	value[request_env.len] = '\0';
 
 	if(setenv(varname, value, 1) == -1) {
-		pr_red("setenv request failed");
+		pr_err("setenv request failed");
 		reply_type = LIBLOADER_FAILURE;
 	}
 
@@ -262,7 +262,7 @@ static void handle_server_sock(struct epoll_event *ev, int efd)
 
 	client = accept(sock, NULL, NULL);
 	if (client < 0)
-		pr_red("socket accept failed");
+		pr_err("socket accept failed");
 
 	epoll_add(efd, client, EPOLLIN);
 }
@@ -276,17 +276,17 @@ static void handle_libloader_request(struct epoll_event *ev, int efd)
 		pr_dbg("client socket closed\n");
 		
 		if (epoll_ctl(efd, EPOLL_CTL_DEL, sock, NULL) < 0)
-			pr_red("epoll del failed");
+			pr_err("epoll del failed");
 
 		close(sock);
 		return;
 	}
 
 	if (read_all(sock, &request, sizeof(request)) < 0)
-		pr_red("message recv failed");
+		pr_err("message recv failed");
 
 	if (request.magic != LOADTRACER_REQUEST_MAGIC)
-		pr_red("invalid message\n");
+		pr_err("invalid message\n");
 
 	switch (request.type) {
 		case LIBLODAER_SET_ENV:
@@ -322,12 +322,12 @@ static int listen_socket(const char *socket_path){
 	unlink(socket_path);
 
 	if (bind(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
-   		pr_red("socket bind error");
+   		pr_err("socket bind error");
 		return -1;
 	}
 
 	if (listen(sock, 1) == -1) {
-    	pr_red("socket listen error");
+    	pr_err("socket listen error");
 		return -1;
 	}
 
@@ -345,7 +345,7 @@ void *request_handler_thread(void *arg)
 
 	libloader_efd = epoll_create1(EPOLL_CLOEXEC);
 	if (libloader_efd < 0)
-		pr_red("epoll error");
+		pr_err("epoll error");
 
 	epoll_add(libloader_efd, libloader_sock, EPOLLIN);	
 

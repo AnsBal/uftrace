@@ -19,7 +19,22 @@ struct tracepoint_handler {
 	char name[];
 };
 
+static struct mcount_dynamic_stats {
+	int total;
+	int failed;
+	int skipped;
+	int nomatch;
+} stats;
+
 static LIST_HEAD(tracepoint_list);
+
+static float calc_percent(int n, int total)
+{
+	if (total == 0)
+		return 0;
+
+	return 100.0 * n / total;
+}
 
 int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs, 
 	enum uftrace_pattern_type ptype)
@@ -50,7 +65,7 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 	size_t fasttp_skip_nr = ARRAY_SIZE(fasttp_skip_symbol);
 
 	strv_split(&funcs, patch_funcs, ";");
-
+	memset(&stats, 0, sizeof(stats));
 	strv_for_each(&funcs, name, j) {
 		unsigned i, j;
 		struct sym *sym;
@@ -61,6 +76,7 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 		for (i = 0; i < symtab->nr_sym; i++) {
 			sym = &symtab->sym[i];
 			bool skip = false;
+			stats.total++;
 			
 			for (j = 0; j < fasttp_skip_nr; j++) {
 				if (!strcmp(sym->name, fasttp_skip_symbol[j].name)) {
@@ -69,16 +85,20 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 				}
 			}	
 
-			if (!match_filter_pattern(&patt, sym->name) || skip)
+			if (!match_filter_pattern(&patt, sym->name) || skip) {
+				stats.skipped++;
 				continue;
+			}
 			if(sym->type != ST_LOCAL_FUNC && sym->type != ST_GLOBAL_FUNC && sym->type != ST_WEAK_FUNC) {
+				stats.skipped++;
 				continue;
 			}
 
 			tracepoint* tp = new_tracepoint((void*) sym->addr);
 
 			if(!tp){
-				pr_dbg2("failed to insert fasttp tracepoint in symbol: %s \n", sym->name);
+				pr_blue("failed to insert fasttp tracepoint in symbol: %s \n", sym->name);
+				stats.failed++;
 				continue;
 			}
 			
@@ -90,11 +110,21 @@ int mcount_setup_fasttp(struct symtabs *symtabs, char *patch_funcs,
 			INIT_LIST_HEAD(&tracepoint_h->list);
 			list_add(&tracepoint_h->list, &tracepoint_list);
 
-			pr_dbg2("successfully inserted fasttp tracepoint in symbol: %s \n", tracepoint_h->name);
+			pr_blue("successfully inserted fasttp tracepoint in symbol: %s \n", tracepoint_h->name);
 		}
 
 		free_filter_pattern(&patt);
 	}
+
+	int success = stats.total - stats.failed - stats.skipped;
+	pr_dbg("dynamic update stats:\n");
+	pr_dbg("   total: %8d\n", stats.total);
+	pr_dbg(" patched: %8d (%.2f%%)\n", success,
+	       calc_percent(success, stats.total));
+	pr_dbg("  failed: %8d (%.2f%%)\n", stats.failed,
+	       calc_percent(stats.failed, stats.total));
+	pr_dbg(" skipped: %8d (%.2f%%)\n", stats.skipped,
+	       calc_percent(stats.skipped, stats.total));
 
 	strv_free(&funcs);
 	return ret;
