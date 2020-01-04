@@ -985,3 +985,35 @@ void mcount_arch_dynamic_recover(struct mcount_dynamic_info *mdi,
 		free(badsym);
 	}
 }
+
+int mcount_arch_branch_table_size(struct mcount_disasm_info *info)
+{
+	return info->nr_branch * ARCH_BRANCH_ENTRY_SIZE;
+}
+
+void mcount_arch_patch_branch(struct mcount_disasm_info *info, struct mcount_orig_insn *orig)
+{
+	uint8_t trampoline[ARCH_TRAMPOLINE_SIZE] = { 0xff, 0x25, };
+	uint64_t target = orig->insn_size;
+	unsigned long jmp_target;
+	unsigned long jcc_index;
+	uint32_t disp;
+	int i;
+
+	/* patch conditional jumps instructions */
+	for (i = 0; i < info->nr_branch; i++) {
+		jmp_target = info->branch_info[i].branch_target;
+		jcc_index = info->branch_info[i].insn_index;
+
+		memcpy(trampoline + JMP_INSN_SIZE, &jmp_target, sizeof(jmp_target));
+		memcpy(orig->insn + target, trampoline, sizeof(trampoline));
+
+		disp = target - (jcc_index + 2);
+		if (disp > SCHAR_MAX) { /* should not happen */
+			pr_err("target is not in reach"); 
+		}
+		info->insns[jcc_index + 1] = disp;
+
+		target += sizeof(trampoline);
+	}
+}

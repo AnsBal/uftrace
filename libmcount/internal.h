@@ -421,6 +421,13 @@ struct mcount_disasm_engine {
 #define INSTRUMENT_FAILED                       -1
 #define INSTRUMENT_SKIPPED                      -2
 
+/* 
+ * Supposing the size of smallest conditional branch is 2 byte.
+ * We can replace, at most, 3 of them by the instrumentation
+ * instruction.
+ */
+#define MAX_COND_BRANCH 3
+
 int mcount_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 			  enum uftrace_pattern_type ptype,
 			  struct mcount_disasm_engine *disasm);
@@ -436,6 +443,10 @@ struct mcount_orig_insn {
 };
 
 typedef struct mcount_orig_insn mcount_redirection;
+struct cond_branch_info {
+	unsigned long insn_index;
+	unsigned long branch_target;
+};
 
 /*
  * mcount_disasm_info - information for dynamic patch
@@ -455,6 +466,8 @@ struct mcount_disasm_info {
 	int			copy_size;
 	bool			modified;
 	bool			has_jump;
+	uint8_t			nr_branch;
+	struct cond_branch_info branch_info[MAX_COND_BRANCH];
 };
 
 struct mcount_code{
@@ -478,6 +491,9 @@ int mcount_patch_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 
 void mcount_disasm_init(struct mcount_disasm_engine *disasm);
 void mcount_disasm_finish(struct mcount_disasm_engine *disasm);
+
+int mcount_arch_branch_table_size(struct mcount_disasm_info *info);
+void mcount_arch_patch_branch(struct mcount_disasm_info *info, struct mcount_orig_insn *orig);
 
 struct dynamic_bad_symbol {
 	struct list_head	list;
