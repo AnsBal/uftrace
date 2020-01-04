@@ -638,6 +638,7 @@ struct mcount_nop_info lookup_viable_nop(cs_insn *insn, uint32_t count,
 			struct symtab *symtab, int index,
 			int prev_index) 
 {
+	static const unsigned char null_operand[] = {0x00, 0x00, 0x00, 0x00, 0x00};
 	struct mcount_nop_info *nopi;
 	struct mcount_nop_info ret;
 	int i;
@@ -652,29 +653,16 @@ struct mcount_nop_info lookup_viable_nop(cs_insn *insn, uint32_t count,
 			ret = *nopi;
 			return ret;
 		} else {
-			switch(nopi->size) {
-			case 8: 
-				ret.size = 5;
-				ret.addr = nopi->addr + 3;
-			return ret;
-
-				break;
-			case 9: 
-				ret.size = 5;
-				ret.addr = nopi->addr + 4;
-			return ret;
-
-				break;
-			case 10: 
-				ret.size = 5;
-				ret.addr = nopi->addr + 5;
-			return ret;
-
-				break;
+			/* Don't use the same reachable NOP more than once */
+			if(memcmp((void* )nopi->addr + nopi->size - CALL_INSN_SIZE, 
+					null_operand, CALL_INSN_SIZE) != 0)
+			{
+				continue;
 			}
-			pr_blue("reachable size: %i\n", nopi->size);
-
-			continue;
+			ret.size = CALL_INSN_SIZE;
+			ret.addr = nopi->addr + nopi->size - CALL_INSN_SIZE;
+			return ret;
+			//pr_blue("reachable size: %i\n", nopi->size);
 		}
 	}
 	
