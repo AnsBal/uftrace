@@ -4,6 +4,11 @@
 #include <signal.h>
 #include <dirent.h>
 #include <pthread.h> 
+#include <time.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
+#include <linux/membarrier.h>
 
 /* This should be defined before #include "utils.h" */
 #define PR_FMT     "dynamic"
@@ -570,8 +575,45 @@ void signal_all_threads(struct mcount_orig_insn *orig){
 	}
 }
 
-void issue_cpuid(){
-	signal_all_threads(NULL);
+static int membarrier(int cmd, int flags)
+{
+	return syscall(__NR_membarrier, cmd, flags);
+}
+
+int initialize_membarrier()
+{
+	static int init = 0;
+	static int ret = 0;
+
+	if(likely(init)) {
+		return ret;
+	} else {
+		init = 1;
+
+		/* Check that membarrier() is supported. */
+		ret = membarrier(MEMBARRIER_CMD_QUERY, 0);
+		if (ret < 0) {
+			return ret;
+		}
+
+		if (!(ret & MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED_SYNC_CORE
+				&& ret & MEMBARRIER_CMD_PRIVATE_EXPEDITED_SYNC_CORE)) {
+			ret = -1;
+			return ret;
+		}
+
+		membarrier(MEMBARRIER_CMD_REGISTER_PRIVATE_EXPEDITED_SYNC_CORE, 0);
+	}
+
+	return ret;
+}
+
+void issue_cpuid()
+{
+	if(initialize_membarrier() < 0)
+		membarrier(MEMBARRIER_CMD_PRIVATE_EXPEDITED_SYNC_CORE, 0);
+	else
+		signal_all_threads(NULL);
 }
 
 /*
