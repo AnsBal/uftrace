@@ -15,6 +15,7 @@
 #include "utils/rbtree.h"
 #include "utils/list.h"
 
+unsigned long dynamic_icache_linesize;
 static struct mcount_dynamic_info *mdinfo;
 static struct mcount_dynamic_stats {
 	int total;
@@ -265,6 +266,18 @@ static void prepare_dynamic_update(struct mcount_disasm_engine *disasm,
 		.symtabs = symtabs,
 		.needs_modules = needs_modules,
 	};
+
+	/*
+	* If we can not get the icache line size, and we get a zero instead, we can
+	* still use it. In this case all patchs will be detected as straddlers.
+	*/
+	uint32_t cpuid_icache_size = cpuid_icache_linesize();
+	dynamic_icache_linesize = sysconf(_SC_LEVEL1_ICACHE_LINESIZE);
+
+	if(cpuid_icache_size != dynamic_icache_linesize) {
+		pr_warn("sysconf() and cpuid_icache_linesize() yield different"
+			" result (%u and %u respectively)\n", dynamic_icache_linesize, cpuid_icache_size);
+	}
 
 	mcount_disasm_init(disasm);
 	dl_iterate_phdr(find_dynamic_module, &fmd);

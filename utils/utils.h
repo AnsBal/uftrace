@@ -312,6 +312,8 @@ struct uftrace_time_range {
 
 struct iovec;
 
+int cpuid_icache_linesize();
+
 int read_all(int fd, void *buf, size_t size);
 int pread_all(int fd, void *buf, size_t size, off_t off);
 int fread_all(void *byf, size_t size, FILE *fp);

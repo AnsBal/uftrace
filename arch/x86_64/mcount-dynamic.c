@@ -21,6 +21,9 @@
 
 #define PAGE_SIZE  4096
 #define PAGE_ADDR(a)    ((void *)((a) & ~(PAGE_SIZE - 1)))
+#define CACHE_ALIGNED(addr, cache_size) ((addr) & ~(cache_size - 1))
+#define cache_straddler(addr, size, cache_size) \
+			((addr + size) <= (CACHE_ALIGNED(addr, cache_size) + cache_size) ? 0 : 1)
 #define XRAY_SECT  "xray_instr_map"
 #define MCOUNTLOC_SECT  "__mcount_loc"
 
@@ -64,6 +67,7 @@ struct arch_dynamic_info {
 
 static struct rb_root redirection_tree = RB_ROOT;
 
+extern unsigned long dynamic_icache_linesize;
 
 void install_trap_handler()
 {
@@ -708,8 +712,10 @@ static void patch_code(struct mcount_dynamic_info *mdi,
 	/* Patch the offset */
 	memcpy(origin_code_addr + 1, call_insn + 1, CALL_INSN_SIZE - 1);
 
-	/* Issue CPUID on each processor */
-	issue_cpuid();
+	/* Issue CPUID on each processor, if straddle cache */
+	if(cache_straddler((unsigned long) origin_code_addr, sizeof(call_insn), dynamic_icache_linesize)) {
+		issue_cpuid();
+	}
 
 	/* Patch the opcode */
 	memcpy(origin_code_addr, call_insn, 1);
@@ -767,8 +773,10 @@ static void patch_code_nop(struct mcount_dynamic_info *mdi,
 	/* Patch the offset */
 	memcpy(origin_code_addr + 1, jmp8_insn + 1, 1);
 
-	/* Issue CPUID on each processor */
-	issue_cpuid();
+	/* Issue CPUID on each processor, if straddle cache */
+	if(cache_straddler((unsigned long)origin_code_addr, sizeof(jmp8_insn), dynamic_icache_linesize)) {
+		issue_cpuid();
+	}
 
 	/* Patch the opcode */
 	memcpy(origin_code_addr, jmp8_insn, 1);

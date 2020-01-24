@@ -19,6 +19,94 @@ volatile bool uftrace_done;
 /* default uftrace options to be applied for analysis commands */
 struct strv default_opts = STRV_INIT;
 
+#include <cpuid.h>
+#include <stdint.h>
+
+union mcount_cache_tlb_info{
+	uint32_t  value;
+	struct {
+		uint32_t  skipped:31;
+		uint32_t  unvalid:1;
+	} u;
+};
+
+/* This function returns the instruction cache line size. */
+static uint32_t handle_cpuid_report(union mcount_cache_tlb_info *reg)
+{
+	#define SHOULD_USE_CPUID_LEAF4 0xFF
+	#define TLB_CACHE_LEAF4 0x4
+	uint8_t value;
+
+	/* Skip unvalid cache info */
+	if (reg->u.unvalid == 0) {
+		for (int i = 1; i <= 3; i++) {
+			value = reg->value >> i & 0xFF;
+
+			if(value == SHOULD_USE_CPUID_LEAF4) {
+				/* CPUID leaf 0x4 contains all the information.  We need to
+				iterate over it.  */
+				union mcount_cache_tlb_info eax;
+				union mcount_cache_tlb_info ebx;
+				union mcount_cache_tlb_info ecx;
+				union mcount_cache_tlb_info edx;
+				uint32_t count = 0;
+				enum { null = 0, data = 1, inst = 2, uni = 3 } type = 3;
+
+				while (type != null)
+				{
+					__cpuid_count (TLB_CACHE_LEAF4, count++, eax.value, ebx.value, ecx.value, edx.value);
+					type = eax.value & 0x1f;
+
+					uint32_t level = (eax.value >> 5) & 0x7;
+					if (level == 1 && type == inst)
+						return (ebx.value & 0xfff) + 1;
+				}
+			} else {
+				switch(value){
+					case 0x06: /* 1st-level instruction cache: 8 KBytes, 4-way set associative, 32 byte line size */
+					case 0x08: /* 1st-level instruction cache: 16 KBytes, 4-way set associative, 32 byte line size */
+					case 0x09: /* 1st-level instruction cache: 32KBytes, 4-way set associative, 64 byte line size */
+						return 32;
+					case 0x30: /* 1st-level instruction cache: 32 KBytes, 8-way set associative, 64 byte line size */
+						return 64;
+				}
+			}
+		}
+	}
+	return 0;
+}
+
+/*
+* This function returns the instruction cache line size.
+* For more information See Intel Processor Identification and
+* CPUID Instruction for more details.
+* It returns 0 if no info found.
+*/
+int cpuid_icache_linesize()
+{
+	#define TLB_CACHE_LEAF2 0x2
+	union mcount_cache_tlb_info eax;
+	union mcount_cache_tlb_info ebx;
+	union mcount_cache_tlb_info ecx;
+	union mcount_cache_tlb_info edx;
+	uint32_t icache_linesize = 0;
+	uint32_t count = 0;
+	uint32_t max = 1;
+
+	while (icache_linesize == 0 && count++ < max) {
+		__get_cpuid(TLB_CACHE_LEAF2, &eax.value, &ebx.value, &ecx.value, &edx.value);
+		if (count == 1)
+            max = eax.value & 0xff;
+
+		icache_linesize = handle_cpuid_report(&eax);
+		icache_linesize = (icache_linesize == 0) ? handle_cpuid_report(&ebx) : icache_linesize;
+		icache_linesize = (icache_linesize == 0) ? handle_cpuid_report(&ecx) : icache_linesize;
+		icache_linesize = (icache_linesize == 0) ? handle_cpuid_report(&edx) : icache_linesize;
+	}
+
+	return icache_linesize;
+}
+
 void sighandler(int sig)
 {
 	uftrace_done = true;
