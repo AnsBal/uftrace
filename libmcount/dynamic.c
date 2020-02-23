@@ -327,6 +327,40 @@ static bool match_pattern_list(struct list_head *patterns,
 	return ret;
 }
 
+#include <sys/stat.h>
+/* write cycle to disk */
+void write_cycle(const char *filename, double delta_cycle)
+{
+  struct stat stat_rec;
+
+  FILE *out = fopen(filename, "a");
+  stat(filename, &stat_rec);
+
+  if (stat_rec.st_size <= 1)
+  {
+    fprintf(out, "cycles\n");
+  }
+
+  fprintf(out, "%f\n", delta_cycle);
+
+  fclose(out);
+}
+
+__inline__ unsigned long long rdtsc_unordered(void) 
+{
+     unsigned a, d; 
+     asm volatile("rdtsc" : "=a" (a), "=d" (d)); 
+     return ((unsigned long long)a) | (((unsigned long long)d) << 32); 
+}
+
+__inline__ unsigned long long rdtsc_ordered(void) 
+{
+     unsigned a, d; 
+     asm volatile("rdtsc\n\t"
+                  "mfence\n\t" : "=a" (a), "=d" (d)); 
+     return ((unsigned long long)a) | (((unsigned long long)d) << 32); 
+}
+
 static int do_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 			     enum uftrace_pattern_type ptype,
 			     struct mcount_disasm_engine *disasm,
@@ -407,6 +441,9 @@ static int do_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 
 		symtab = &map->mod->symtab;
 
+		struct sym **valid_sym = malloc(sizeof(struct sym *) * symtab->nr_sym);
+		uint64_t count_valid = 0;
+
 		for (i = 0; i < symtab->nr_sym; i++) {
 			sym = &symtab->sym[i];
 			
@@ -430,8 +467,17 @@ static int do_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 				continue;
 			}
 
+			sym->index = i;
+			valid_sym[count_valid] = &symtab->sym[i];
+			count_valid++;
+
 			found = true;
-			switch (mcount_patch_func(mdi, sym, symtab, i, disasm, min_size)) {
+		}
+
+		unsigned long long cycle_start, cycle_stop;
+		cycle_start = rdtsc_ordered();
+		for (i = 0; i < count_valid; i++) {
+			switch (mcount_patch_func(mdi, valid_sym[i], symtab, valid_sym[i]->index, disasm, min_size)) {
 			case INSTRUMENT_FAILED:
 				stats.failed++;
 				break;
@@ -444,6 +490,8 @@ static int do_dynamic_update(struct symtabs *symtabs, char *patch_funcs,
 			}
 			stats.total++;
 		}
+		cycle_stop = rdtsc_ordered();
+		write_cycle("results/instrument_bench", (double)(cycle_stop - cycle_start)/count_valid);
 
 		if (!found)
 			stats.nomatch++;

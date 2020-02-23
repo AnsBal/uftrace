@@ -6,6 +6,8 @@
 #include <pthread.h> 
 #include <time.h>
 #include <stdio.h>
+#include <time.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <linux/membarrier.h>
