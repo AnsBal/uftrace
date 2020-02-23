@@ -436,8 +436,8 @@ static bool check_unsupported(struct mcount_disasm_engine *disasm,
 			if (info->addr > target ||
 			    target >= info->addr + info->sym->size) {
 				/* also mark the target function as invalid */
-						pr_blue("bad sym found at %s : %s\t %s\n",
-				info->sym->name, insn->mnemonic, insn->op_str);
+				//pr_blue("bad sym found at %s : %s\t %s\n",
+				//info->sym->name, insn->mnemonic, insn->op_str);
 				return !mcount_add_badsym(mdi, insn->address,
 							  target);
 			}
@@ -497,10 +497,10 @@ static int disasm_size_check_insns(struct mcount_disasm_engine *disasm,
 
 		if (status > 0) {
 			status = INSTRUMENT_FAILED;
-			//pr_dbg3("not supported instruction found at %s : %s\t %s\n",
-			//	info->sym->name, insn[i].mnemonic, insn[i].op_str);
-			pr_blue("not instrumentable instruction found at %s : %s\t %s\n",
+			pr_dbg3("not supported instruction found at %s : %s\t %s\n",
 				info->sym->name, insn[i].mnemonic, insn[i].op_str);
+			//pr_blue("not instrumentable instruction found at %s : %s\t %s\n",
+			//info->sym->name, insn[i].mnemonic, insn[i].op_str);
 			goto out;
 		}
 
@@ -520,8 +520,8 @@ static int disasm_size_check_insns(struct mcount_disasm_engine *disasm,
 	while (++i < count) {
 		if (!check_unsupported(disasm, &insn[i], mdi, info)) {
 			status = INSTRUMENT_FAILED;
-			pr_blue("not supported instruction found at %s : %s\t %s\n",
-				info->sym->name, insn[i].mnemonic, insn[i].op_str);
+			//pr_blue("not supported instruction found at %s : %s\t %s\n",
+			//	info->sym->name, insn[i].mnemonic, insn[i].op_str);
 			break;
 		}
 	}
@@ -577,8 +577,8 @@ static bool is_unreachable_insn(cs_insn *insn_array, uint32_t index,
 		insn = &insn_array[i];
 	}
 
-	pr_blue("previous insn: %s %s \taddr %p \tsize %i\n",
-			 insn->mnemonic, insn->op_str, insn->address, insn->size);
+	//pr_blue("previous insn: %s %s \taddr %p \tsize %i\n",
+	//		 insn->mnemonic, insn->op_str, insn->address, insn->size);
 	
 	if(strcmp(insn->mnemonic, "jmp") != 0 &&
 		strcmp(insn->mnemonic, "ret") != 0) /*  &&
@@ -612,8 +612,8 @@ static bool is_unreachable_insn(cs_insn *insn_array, uint32_t index,
 				if (start_insn->address <= target &&
 					target <= insn_array[index].address) 
 				{
-					pr_blue("jump to unreachable_insn: %s %s \taddr %p \tsize %i\n",
-							insn->mnemonic, insn->op_str, insn->address, insn->size);
+					//pr_blue("jump to unreachable_insn: %s %s \taddr %p \tsize %i\n",
+					//		insn->mnemonic, insn->op_str, insn->address, insn->size);
 					return false;
 				}
 				break;
@@ -651,7 +651,7 @@ static bool is_func_pad(struct mcount_nop_info *nopi,
 
 		if(nopi->addr >= prev_end && next_start > nopi->addr) {
 			
-			pr_blue("FUNC PAD: %p in start %p  end %p \n", nopi->addr, prev_end, next_start);
+			//pr_blue("FUNC PAD: %p in start %p  end %p \n", nopi->addr, prev_end, next_start);
 			return true;
 		}
 	}
@@ -683,8 +683,8 @@ static struct mcount_nops get_potential_nops(cs_insn *insn, uint32_t count,
 			if (offset < SCHAR_MIN || offset > SCHAR_MAX)
 				continue;
 
-			pr_blue("NOP found insn: %s %s \taddr %p \tsize %i\n",
-				 insn[i].mnemonic, insn[i].op_str, insn[i].address, insn[i].size);
+			//pr_blue("NOP found insn: %s %s \taddr %p \tsize %i\n",
+			//	 insn[i].mnemonic, insn[i].op_str, insn[i].address, insn[i].size);
 		
 			nopi = &nops.infos[nops.count++];
 			nopi->addr = insn[i].address;
@@ -717,11 +717,11 @@ static struct mcount_nops get_potential_nops(cs_insn *insn, uint32_t count,
 		}
 	}
 
-	if(nops.count == 0 )
+	/*if(nops.count == 0 )
 		pr_blue("No potential NOP found\n");
 	else 
 		pr_blue("Potential NOP found insn: %s %s size: %i\n", insn[dbg_i].mnemonic,
-					 insn[dbg_i].op_str, insn[dbg_i].size);
+					 insn[dbg_i].op_str, insn[dbg_i].size);*/
 
 	return nops;
 }
@@ -760,8 +760,8 @@ struct mcount_nop_info lookup_viable_nop(cs_insn *insn, uint32_t count,
 		}
 	}
 	
-	if(nops->count != 0)
-		pr_blue("not viable\n");
+	/*if(nops->count != 0)
+		pr_blue("not viable\n");*/
 
 	return ret;
 }
@@ -773,7 +773,7 @@ struct mcount_nop_info disasm_find_nops(struct mcount_disasm_engine *disasm,
 {
 	cs_insn *insn = NULL;
 	uint32_t count;
-	uint8_t endbr64[] = { 0xf3, 0x0f, 0x1e, 0xfa };
+	//uint8_t endbr64[] = { 0xf3, 0x0f, 0x1e, 0xfa };
 	struct mcount_nops nops;
 	struct mcount_nop_info ret;
 
@@ -783,20 +783,9 @@ struct mcount_nop_info disasm_find_nops(struct mcount_disasm_engine *disasm,
 
 	count = cs_disasm(disasm->engine, (void *)prev_addr, info->sym->addr - prev_sym->addr,
 			  prev_addr, 0, &insn);
-	if (count == 0 && !memcmp((void *)prev_addr, endbr64, sizeof(endbr64))) {
-		/* old version of capstone doesn't recognize ENDBR64 insn */
-		unsigned long addr = prev_addr + sizeof(endbr64);
 
-		info->orig_size += sizeof(endbr64);
-		info->copy_size += sizeof(endbr64);
-
-		count = cs_disasm(disasm->engine, (void *)addr,
-				   info->sym->addr - prev_sym->addr - sizeof(endbr64),
-				   addr, 0, &insn);
-	}
-
-	pr_blue("\n------------sym: %s (%p - %p)  \tprev_sym: %s (%p - %p)--------------\n",	
-			info->sym->name, info->sym->addr, info->sym->size, prev_sym->name, prev_sym->addr, prev_sym->size);
+	//pr_blue("\n------------sym: %s (%p - %p)  \tprev_sym: %s (%p - %p)--------------\n",	
+	//		info->sym->name, info->sym->addr, info->sym->size, prev_sym->name, prev_sym->addr, prev_sym->size);
 
 	nops = get_potential_nops(insn, count, info);
 	ret = lookup_viable_nop(insn, count, &nops, mdi, info, symtab, index, prev_index);
@@ -808,17 +797,6 @@ struct mcount_nop_info disasm_find_nops(struct mcount_disasm_engine *disasm,
 	if(ret.addr == 0) { 
 		count = cs_disasm(disasm->engine, (void *)info->addr, 128,
 				info->addr, 0, &insn);
-		if (count == 0 && !memcmp((void *)prev_addr, endbr64, sizeof(endbr64))) {
-			/* old version of capstone doesn't recognize ENDBR64 insn */
-			unsigned long addr = prev_addr + sizeof(endbr64);
-
-			info->orig_size += sizeof(endbr64);
-			info->copy_size += sizeof(endbr64);
-
-			count = cs_disasm(disasm->engine, (void *)addr,
-					info->sym->addr - prev_sym->addr - sizeof(endbr64),
-					addr, 0, &insn);
-		}
 
 		nops = get_potential_nops(insn, count, info);
 		ret = lookup_viable_nop(insn, count, &nops, mdi, info, symtab, index, prev_index);
