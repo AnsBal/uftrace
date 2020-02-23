@@ -473,6 +473,9 @@ pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 struct sig_data {
 	int th_counter;
 	int nr_thread;
+//	int th_counter;
+//	int nr_thread;
+	int flag;
 	struct mcount_orig_insn* orig;
 };
 
@@ -513,11 +516,12 @@ void mcount_sigusr_handler(int sig_number, siginfo_t* sig, void* _ctx)
 				((ucontext_t*)_ctx)->uc_mcontext.gregs[REG(IP)] = (unsigned long) orig->insn + (rip - orig->orig_addr - 1);
 		}
 
-		pthread_mutex_lock(&lock);
-		if(++sd->th_counter >= sd->nr_thread) {
-			pthread_cond_signal(&cond1);
-		}
-		pthread_mutex_unlock(&lock);
+		__atomic_store_n(&sd->flag, 1, __ATOMIC_RELAXED);
+		/*pthread_mutex_lock(&lock);
+ 		if(++sd->th_counter >= sd->nr_thread) {
+ 			pthread_cond_signal(&cond1);
+ 		}
+		pthread_mutex_unlock(&lock);*/
 	}
 }
 
@@ -527,52 +531,66 @@ void signal_all_threads(struct mcount_orig_insn *orig){
 	char str[128];
 	char pid[10];
 	int tid;
+	int index = 0;
 
 	strcpy(str, "/proc/");
 	sprintf(pid, "%d", getpid());
 	strcat(str, pid);
 	strcat(str, "/task");
 
-	struct sig_data sd = {0};
-	sd.orig = orig;
+	//struct sig_data sd = {0};
+#define MAX_THREAD 30 /* TODO: dynamic alloc */
+	volatile struct sig_data sd[MAX_THREAD] = {[0 ... MAX_THREAD-1] = 0};
+	//sd.orig = orig;
 
 	siginfo_t sig;
 	sig.si_code = SI_QUEUE;
 	sig.si_pid = getpid();
 	sig.si_uid = getuid();
 
- 	pthread_cond_init(&cond1, NULL);
-    pthread_mutex_init(&lock, NULL);
+ 	//pthread_cond_init(&cond1, NULL);
+    //pthread_mutex_init(&lock, NULL);
 
 	if ((dir = opendir(str)) == NULL)
 		perror("opendir() error");
 	else {
 		while ((entry = readdir(dir)) != NULL) {
 			if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
-				sd.nr_thread++;
+				//sd.nr_thread++;
 			}
 		}
-		sd.nr_thread--;
+		//sd.nr_thread--;
 		rewinddir(dir);
 		while ((entry = readdir(dir)) != NULL) {
 			if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
 				sscanf(entry->d_name, "%d", &tid); 
 				if(tid != syscall(SYS_gettid)){
 					//syscall(SYS_tgkill, getpid(), tid, SIGUSR1);
-					sig.si_value.sival_ptr = &sd;
+					sd[index].orig = orig;
+
+					//sig.si_value.sival_ptr = &sd;
+					sig.si_value.sival_ptr = &sd[index];
+					index++;
 					syscall(SYS_rt_tgsigqueueinfo, getpid(), tid, SIGUSR1, &sig);
 				}
 			}
 		}
 		
-		pthread_mutex_lock(&lock);
+		/* TODO: Handle cases where a thread finish before receiving the signal */
+		for (int i = 0; i < index; i++) {
+			while(1) {
+				if (sd[i].flag == 1) break;
+			}
+		}
+
+		/*pthread_mutex_lock(&lock);
         struct timespec max_wait = {0, 0};
  		clock_gettime(CLOCK_REALTIME, &max_wait);
         max_wait.tv_sec += 1;
 		while (sd.th_counter < sd.nr_thread) {
 			pthread_cond_timedwait(&cond1, &lock, &max_wait);
 		}
-		pthread_mutex_unlock(&lock);
+		pthread_mutex_unlock(&lock);*/
 		
 		//pthread_cond_wait(&cond1, &lock);
 		closedir(dir);
