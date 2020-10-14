@@ -58,7 +58,7 @@ void install_trap_handler()
 	sigaction(SIGTRAP, NULL, &act); /* get current trap handler */
 	/*
 	* reuse current trap handler and set mcount_dynamic_trap as the
-	* master trap handler 
+	* master trap handler
 	*/
 	sigaction(SIGTRAP, &act, NULL);
 }
@@ -128,7 +128,7 @@ int mcount_setup_trampoline(struct mcount_dynamic_info *mdi)
 		memcpy((void *)mdi->trampoline, trampoline, sizeof(trampoline));
 		memcpy((void *)mdi->trampoline + sizeof(trampoline),
 		       &dentry_addr, sizeof(dentry_addr));
-		
+
 		install_trap_handler();
 #endif
 	}
@@ -559,7 +559,7 @@ static void destroy_mem_regions(struct dynamic_mem_region *regions)
 
 	while(current != NULL) {
 		previous = current;
-		current = current->next; 
+		current = current->next;
 		free(previous);
 	}
 }
@@ -578,9 +578,9 @@ static struct dynamic_mem_region * get_free_mem_regions(struct dynamic_mem_regio
 		free_reg->range.end = mapped_reg->range.start;
 	}
 
-	while(mapped_reg != NULL 
-			&& mapped_reg->next != NULL 
-			&& mapped_reg->next->next != NULL) 
+	while(mapped_reg != NULL
+			&& mapped_reg->next != NULL
+			&& mapped_reg->next->next != NULL)
 	{
 
 		if(mapped_reg->range.end == mapped_reg->next->range.start) {
@@ -603,7 +603,7 @@ static struct dynamic_mem_region * get_free_mem_regions(struct dynamic_mem_regio
 		free_reg->range.end = ULONG_MAX;
 	}
 	free_reg->next = NULL;
-	
+
 	return ret;
 }
 
@@ -627,7 +627,7 @@ static int32_t constaint_to_integer(struct dynamic_constraint dc, uint8_t val)
 	return ret[0] + (ret[1] << 8) + (ret[2] << 16) + (ret[3] << 24);
 }
 
-struct mcount_address_range intersect(struct mcount_address_range range1, 
+struct mcount_address_range intersect(struct mcount_address_range range1,
 				struct mcount_address_range range2)
 {
 	uintptr_t min = max(range1.start, range2.start);
@@ -637,7 +637,7 @@ struct mcount_address_range intersect(struct mcount_address_range range1,
 	if (min < max) {
 		range.start = min;
 		range.end = max;
-	}	
+	}
 
 	return range;
 }
@@ -647,7 +647,7 @@ struct mcount_address_range constraint_to_range(struct dynamic_constraint dc, ui
 	int32_t start = constaint_to_integer(dc, 0x00);
 	int32_t end = constaint_to_integer(dc, 0xff);
 	struct mcount_address_range ret;
-	
+
 	/* if MSB of constraint is zero, start will be positive and end negative */
 	if(!dc.constraint[3]){
 		start |= (1 << 31);
@@ -664,7 +664,7 @@ struct mcount_address_range constraint_to_range(struct dynamic_constraint dc, ui
 /*
  * Find a free memory range that intersect with the range of the constraint.
  */
-static uintptr_t find_free_address(struct dynamic_constraint dc, uintptr_t sym_addr, int size) 
+static uintptr_t find_free_address(struct dynamic_constraint dc, uintptr_t sym_addr, int size)
 {
 	struct dynamic_mem_region *mapped_reg;
 	struct dynamic_mem_region *free_reg;
@@ -687,22 +687,22 @@ static uintptr_t find_free_address(struct dynamic_constraint dc, uintptr_t sym_a
 
 		if(inter_range.start != 0 && inter_range.end != 0) {
 			offset = inter_range.start - sym_addr;
-			if(offset < INT_MIN || offset > INT_MAX) 
+			if(offset < INT_MIN || offset > INT_MAX)
 				goto next;
 
 			for(int i = 0; i < 4; i++)
 				((uint8_t*) &offset)[i] = dc.constraint[i] ? dc.constraint[i] : ((uint8_t*) &offset)[i] ;
-				
-			if( (sym_addr + (int32_t)offset) >= inter_range.start 
+
+			if( (sym_addr + (int32_t)offset) >= inter_range.start
 					&& (sym_addr + (int32_t)offset + size) <= inter_range.end)
 			{
 				ret = sym_addr + (int32_t)offset;
 				pr_dbg3("found free address: %p \n", ret);
 				break;
-			}			
+			}
 		}
 		next:
-		reg = reg->next; 
+		reg = reg->next;
 	}
 
 	destroy_mem_regions(mapped_reg);
@@ -796,15 +796,16 @@ static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, s
 	unsigned char call_insn[] = { 0xe8, 0x00, 0x00, 0x00, 0x00 };
 	int64_t target_addr;
 	uintptr_t free_addr;
+  struct dynamic_constraint recursive_dc;
 	//mcount_redirection *red;
-	
-	struct dynamic_constraint recursive_dc = create_constraint(disasm, mdi, addr);
+
 	if (dc.instr_size < CALL_INSN_SIZE)
 		return INSTRUMENT_FAILED;
 
 	for(int i = 4; i > 0; i--){
+	  recursive_dc = create_constraint(disasm, mdi, addr - i);
 		if(dc.constraint[i]){
-			free_addr = setup_trampoline_constraint(dc, addr + 1 + i);
+			free_addr = setup_trampoline_constraint(recursive_dc, addr + 1 + i);
 			if(!free_addr)
 				return INSTRUMENT_FAILED;
 
@@ -814,7 +815,7 @@ static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, s
 				//red = lookup_redirection(&redirection_tree, addr + 1 + i, true);
 				//red->insn = orig->insn + 1 + i;
 		}
-		shift_left_dynamic_constraint(&dc);
+		//shift_left_dynamic_constraint(&dc);
 	}
 
 	/* patch address */
@@ -832,23 +833,23 @@ static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, s
 	__builtin___clear_cache(origin_code_addr,
 				origin_code_addr + dc.instr_size);
 
-	pr_dbg3("instrument address: %p, offset: %i, instr: %X%X%X%X%X \n", addr, target_addr, 
+	pr_dbg3("instrument address: %p, offset: %i, instr: %X%X%X%X%X \n", addr, target_addr,
 			call_insn[0], call_insn[1], call_insn[2], call_insn[3], call_insn[4]);
-			 
+
 	return INSTRUMENT_SUCCESS;
 }
 
 /*
  * To safely patch unsupported functions that jumps or may jump to their
- * prologues, we embed an illegal instruction like "int3" in 
+ * prologues, we embed an illegal instruction like "int3" in
  * offset of the call. The illegal instruction should be embedded
  * in the head of every overwritten instruction, but the first one (it will be
  * set to the call opcode).
- * 
+ *
  * [example]:
  * In this example, the first instruction (push rbp) will be replaced by the call opcode. The second
  * byte is the head of the first overwritten instruction, and it should be replaced by "int3".
- * The 3rd and 4th bytes can be set to whatever value. The 5th byte is the head of the 
+ * The 3rd and 4th bytes can be set to whatever value. The 5th byte is the head of the
  * second overwritten instruction, thus it should be replaced with "int3". The remaining bytes will
  * be replaced by a "nop".
  * Note: "int3" opcode is "0xCC"
@@ -861,36 +862,36 @@ static int patch_code_constraint(struct dynamic_constraint dc, uintptr_t addr, s
  *   dynamic: 0x400551[01]:nop
  *   dynamic: 0x400552[01]:nop
  *   dynamic: 0x400553[01]:nop
- *   dynamic: 0x400554[01]:nop  
- *  
- * The role of "int3" is to redirect the thread that step into it to the out of line 
+ *   dynamic: 0x400554[01]:nop
+ *
+ * The role of "int3" is to redirect the thread that step into it to the out of line
  * instructions so that he could resume his execution without executing random instructions.
- * 
+ *
  * This instrumentation technique doesn't restrain to function entry and exit
  * it could also be used to instrument an arbitrary location in a function.
- * 
+ *
  * Since we need to respect a constraint made from the "int3" in the offset of
  * the call, we intersect free memory regions and the reachable range
  * with the offset, to find a suitable place to put the trampoline in.
- * 
+ *
  * [example]:
- * 
+ *
  *   mapped region      free region      mapped region     free region        mapped region
  *      [a, b]             [c, d]           [e, f]           [g, h]              [i, j]
  * 							 ^				   ^				^
- * 					  [x - 0x00CCCC00		   x		 x + 0xFFCCCCFF] 
- *  
+ * 					  [x - 0x00CCCC00		   x		 x + 0xFFCCCCFF]
+ *
  * let's suppose the symbol we instrument starts at the address x that falls in the range [e, f]
- * and the constraint we should respect is "?? CC CC ??". the reachable range 
- * is [x - 0x00CCCC00, x + 0xFFCCCCFF]. Any free range that intersect with our reachable range 
+ * and the constraint we should respect is "?? CC CC ??". the reachable range
+ * is [x - 0x00CCCC00, x + 0xFFCCCCFF]. Any free range that intersect with our reachable range
  * is potentially  suitable for the trampoline. The intersection of the free range [c, d] with
  * the reachable range gives [x - 0x00CCCC00, d]. if the size of the resulted range is smaller than
- * the trampoline size, we move on to the next intersection. 
- * 
+ * the trampoline size, we move on to the next intersection.
+ *
  * To make sure that the techniques works even when the user override our dynamic
- * trap handler, we hook sigaction() to make sure that our trap handler always get 
+ * trap handler, we hook sigaction() to make sure that our trap handler always get
  * the trap signal first and then dispatch it to the user trap handler if needed.
- *  
+ *
  */
 static int patch_unsupported_func(struct mcount_dynamic_info *mdi, struct sym *sym,
 			     struct mcount_disasm_engine *disasm)

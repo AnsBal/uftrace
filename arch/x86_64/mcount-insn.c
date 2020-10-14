@@ -182,7 +182,7 @@ struct dynamic_constraint create_constraint(struct mcount_disasm_engine *disasm,
 				  insn_check.func_size, insn_check.addr,
 				  insn_check.addr, &insn);
 	}
-	
+
 	for (i = 0; i < count; i++) {
 		if (!check_instrumentable(disasm, &insn[i])) {
 			pr_dbg3("instruction not supported: %s\t %s\n",
